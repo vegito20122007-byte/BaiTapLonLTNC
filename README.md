@@ -1,4 +1,5 @@
 # BaiTapLonLTNC
-This is a new project for LTNC 
-Testing testing
-New features
+This is a new project for LTNC \
+Testing testing \
+New features \
+Testing new features \
