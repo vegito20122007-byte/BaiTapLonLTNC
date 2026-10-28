@@ -15,14 +15,15 @@ import java.util.List;
  */
 
 public abstract class User extends Entity {
+    private static final long serialVersionUID = 1L;
     protected String username;
     protected String password;
     protected String role;
     protected double balance;
     protected List<Item> items = new ArrayList<>();
 
-    public User(){
-        super();
+    public User(Integer id){
+        super(id);
     }
     public User(Integer id, String username, String plainPassword, String role) {
         this.id = id;
@@ -38,12 +39,11 @@ public abstract class User extends Entity {
      * @param password Mật khẩu gốc cần băm
      * @return Chuỗi hex mã hóa SHA-256
      */
-
     public static String hashPassword(String password) {
         if (password == null) return null;
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(password.getBytes());
+            byte[] hash = md.digest(password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             for (byte b : hash) {
                 sb.append(String.format("%02x", b));
@@ -53,6 +53,18 @@ public abstract class User extends Entity {
             throw new RuntimeException("Không tìm thấy thuật toán SHA-256");
         }
     }
+
+    /**
+     * Xác thực mật khẩu người dùng.
+     *
+     * @param rawPassword mật khẩu nhập vào
+     * @return true nếu chính xác, ngược lại false
+     */
+    public boolean authenticatePassword(String rawPassword) {
+        return (this.password != null) && (this.password.equals(hashPassword(rawPassword)));
+    }
+
+
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
 

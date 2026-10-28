@@ -6,7 +6,7 @@ package com.auction.model;
  */
 
 public class Admin extends User{
-    public static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
     public Admin() {
         super();

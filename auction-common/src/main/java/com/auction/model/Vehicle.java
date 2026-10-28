@@ -10,7 +10,8 @@ public class Vehicle extends Item {
     private double odometer;
 
     public Vehicle(Integer id) {
-        super();
+        super(id);
+        setCategory("VEHICLE");
     }
     public Vehicle(Integer id, String name, String description, Seller owner, String manufacturer, double odometer) {
         super(id, name, description, "VEHICLE", owner);

@@ -6,7 +6,8 @@ public class Art extends Item{
     private int yearCreated;
 
     public Art(Integer id) {
-        super();
+        super(id);
+        setCategory("ART");
     }
     public Art(Integer id, String name, String description, Seller owner, String artist, int yearCreated) {
         super(id, name, description, "ART", owner);

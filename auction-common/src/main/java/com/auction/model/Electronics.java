@@ -10,7 +10,8 @@ public class Electronics extends Item{
     private int warrantyMonths;
 
     public Electronics(Integer id) {
-        super();
+        super(id);
+        setCategory("ELECTRONICS");
     }
     public Electronics(Integer id, String name, String description, Seller owner, String brand, int warrantyMonths) {
         super(id, name, description, "ELECTRONICS", owner);

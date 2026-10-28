@@ -1,7 +1,5 @@
 package com.auction.model;
 
-import java.awt.font.LineMetrics;
-
 /**
  * Lớp trừu tượng định nghĩa sản phẩm đưa lên sàn đấu giá.
  * Thể hiện tính Đa hình (Polymorphism) qua phương thức trừu tượng getDetails().
@@ -17,8 +15,8 @@ public abstract class Item extends Entity{
     protected String imageData;
     protected Seller owner;
 
-    public Item() {
-        super();
+    public Item(Integer id) {
+        super(id);
     }
 
     public Item(Integer id, String name, String description, String category, Seller owner) {
