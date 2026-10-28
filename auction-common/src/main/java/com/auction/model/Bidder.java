@@ -8,8 +8,8 @@ package com.auction.model;
 public class Bidder extends User{
     private static final long serialVersionUID = 1L;
 
-    public Bidder() {
-        super();
+    public Bidder(Integer id) {
+        super(id);
     }
     public Bidder(Integer id, String username, String password) {
         super(id, username, password, "BIDDER");

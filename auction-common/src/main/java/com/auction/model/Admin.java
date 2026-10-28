@@ -8,8 +8,8 @@ package com.auction.model;
 public class Admin extends User{
     private static final long serialVersionUID = 1L;
 
-    public Admin() {
-        super();
+    public Admin(Integer id) {
+        super(id);
     }
     public Admin(Integer id, String username, String password) {
         super(id, username, password, "ADMIN");
