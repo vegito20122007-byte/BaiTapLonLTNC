@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Hyperlink?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+
+<StackPane fx:id="rootPane" prefHeight="600.0" prefWidth="650.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.auction.client.controllers.RegisterController">
+   <children>
+      <VBox fx:id="cardBox" alignment="CENTER" maxWidth="390.0" spacing="12.0">
+         <padding>
+            <Insets bottom="30.0" left="35.0" right="35.0" top="30.0" />
+         </padding>
+         <children>
+            <Label text="HỆ THỐNG ĐẤU GIÁ">
+               <font>
+                  <Font name="System Bold" size="20.0" />
+               </font>
+            </Label>
+            <Label text="Đăng ký tài khoản thành viên mới" textFill="#666666">
+               <font>
+                  <Font size="13.0" />
+               </font>
+               <VBox.margin>
+                  <Insets bottom="5.0" />
+               </VBox.margin>
+            </Label>
+            <VBox alignment="CENTER_LEFT" spacing="4.0">
+               <children>
+                  <Label text="Tên đăng nhập:">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <TextField fx:id="txtUsername" maxWidth="1.7976931348623157E308" prefHeight="35.0" promptText="Nhập tên đăng nhập..." />
+               </children>
+            </VBox>
+            <VBox alignment="CENTER_LEFT" spacing="4.0">
+               <children>
+                  <Label text="Mật khẩu:">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <PasswordField fx:id="txtPassword" maxWidth="1.7976931348623157E308" prefHeight="35.0" promptText="Nhập mật khẩu (tối thiểu 6 ký tự)..." />
+               </children>
+            </VBox>
+            <VBox alignment="CENTER_LEFT" spacing="4.0">
+               <children>
+                  <Label text="Xác nhận mật khẩu:">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <PasswordField fx:id="txtConfirmPassword" maxWidth="1.7976931348623157E308" prefHeight="35.0" promptText="Nhập lại mật khẩu..." />
+               </children>
+            </VBox>
+            <VBox alignment="CENTER_LEFT" spacing="4.0">
+               <children>
+                  <Label text="Vai trò tham gia:">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <ComboBox fx:id="cbRole" maxWidth="1.7976931348623157E308" prefHeight="35.0" promptText="Chọn vai trò..." />
+               </children>
+            </VBox>
+            <Label fx:id="lblMessage" textFill="#d32f2f" wrapText="true">
+               <font>
+                  <Font size="12.0" />
+               </font>
+            </Label>
+            <Button defaultButton="true" maxWidth="1.7976931348623157E308" onAction="#handleRegister" prefHeight="38.0" text="Đăng ký tài khoản">
+               <font>
+                  <Font name="System Bold" size="13.0" />
+               </font>
+               <VBox.margin>
+                  <Insets top="5.0" />
+               </VBox.margin>
+            </Button>
+            <HBox alignment="CENTER" spacing="5.0">
+               <children>
+                  <Label text="Đã có tài khoản?" textFill="#555555" />
+                  <Hyperlink onAction="#switchToLogin" text="Đăng nhập ngay">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Hyperlink>
+               </children>
+               <VBox.margin>
+                  <Insets top="5.0" />
+               </VBox.margin>
+            </HBox>
+         </children>
+      </VBox>
+   </children>
+</StackPane>
