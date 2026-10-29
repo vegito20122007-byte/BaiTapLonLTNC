@@ -10,9 +10,48 @@
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <groupId>com.auction</groupId>
     <artifactId>auction-server</artifactId>
-    <version>1.0-SNAPSHOT</version>
 
+    <dependencies>
+        <!-- Phụ thuộc module auction-common chứa domain models -->
+        <dependency>
+            <groupId>com.auction</groupId>
+            <artifactId>auction-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
+        <!-- Google Gson xử lý giao thức dữ liệu JSON -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+        </dependency>
+
+        <!-- Driver kết nối CSDL MySQL (JDBC) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <version>8.3.0</version>
+        </dependency>
+
+        <!-- JUnit 5 Kiểm thử Unit Test -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Plugin hỗ trợ chạy Server trực tiếp bằng lệnh: mvn exec:java -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <mainClass>com.auction.server.AuctionServer</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
