@@ -1,6 +1,7 @@
 package com.auction.client.controllers;
 
 import com.auction.client.session.SessionManager;
+import com.auction.model.Bidder;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -71,7 +72,7 @@ public class LoginController extends BaseController {
             // =========================================================================
 
             // GIẢ LẬP: Lưu người dùng vào SessionManager
-            SessionManager.getInstance().setCurrentUser(username);
+            SessionManager.getInstance().setCurrentUser(new Bidder(1, username, password));
             System.out.println("[LoginController] Đăng nhập thành công! Đã lưu Session.");
             showSuccess(lblError, "Đăng nhập thành công!");
 

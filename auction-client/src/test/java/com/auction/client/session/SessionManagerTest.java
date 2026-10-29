@@ -1,12 +1,14 @@
 package com.auction.client.session;
 
+import com.auction.model.Bidder;
+import com.auction.model.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Kiểm thử đơn vị (Unit Test) cho SessionManager.
+ * Kiểm thử đơn vị (Unit Test) cho SessionManager với model User thật từ auction-common.
  */
 public class SessionManagerTest {
 
@@ -32,16 +34,18 @@ public class SessionManagerTest {
 
     @Test
     void testSetAndGetCurrentUser() {
-        String mockUser = "test_user_payload";
+        User mockUser = new Bidder(1, "taylermode", "password123");
         sessionManager.setCurrentUser(mockUser);
 
         assertTrue(sessionManager.isLoggedIn(), "Sau khi set user thì isLoggedIn phải là true");
-        assertEquals(mockUser, sessionManager.getCurrentUser(), "getCurrentUser phải trả về đúng đối tượng đã lưu");
+        assertNotNull(sessionManager.getCurrentUser(), "currentUser không được null");
+        assertEquals("taylermode", sessionManager.getCurrentUser().getUsername());
     }
 
     @Test
     void testClearSession() {
-        sessionManager.setCurrentUser("sample_user");
+        User mockUser = new Bidder(2, "seller01", "password123");
+        sessionManager.setCurrentUser(mockUser);
         assertTrue(sessionManager.isLoggedIn());
 
         sessionManager.clear();
