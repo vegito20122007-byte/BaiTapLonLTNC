@@ -9,7 +9,7 @@ import com.auction.model.User;
 public class SessionManager {
 
     private static volatile SessionManager instance;
-    private User currentUser;
+    private volatile User currentUser;
 
     // Private constructor ngăn việc khởi tạo trực tiếp từ bên ngoài (Singleton)
     private SessionManager() {
