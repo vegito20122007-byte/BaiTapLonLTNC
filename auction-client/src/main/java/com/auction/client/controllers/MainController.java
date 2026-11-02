@@ -8,6 +8,7 @@ import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
+import com.auction.client.session.SessionManager;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -160,6 +161,10 @@ public class MainController extends BaseController {
 
         confirmAlert.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
+                // 1. Xóa sạch dữ liệu phiên đăng nhập
+                SessionManager.getInstance().clear();
+                // 2. Chuyển về màn hình LoginView
+                switchToScene(event, "/views/LoginView.fxml", "Hệ thống Đấu giá Trực tuyến - Đăng nhập");
                 // Kiểm tra xem đã có LoginView của bạn số 3 chưa
                 if (getClass().getResource("/views/LoginView.fxml") != null) {
                     switchToScene(event, "/views/LoginView.fxml", "Đăng nhập hệ thống Đấu giá");

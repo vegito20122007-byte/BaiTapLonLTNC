@@ -89,6 +89,8 @@ public class LoginController extends BaseController {
                 switchToScene(event, "/views/AdminView.fxml", "Hệ thống Đấu giá - Kênh Quản trị viên (Admin)");
             } else if (username.toLowerCase().contains("history")) {
                 switchToScene(event, "/views/HistoryView.fxml", "Hệ thống Đấu giá - Lịch sử giao dịch & đấu giá");
+            } else if (user instanceof Bidder) {
+                switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
             } else {
                 switchToScene(event, "/views/SellerView.fxml", "Hệ thống Đấu giá - Kênh Người bán (Seller)");
             }
@@ -116,6 +118,6 @@ public class LoginController extends BaseController {
      */
     public void switchToMain(ActionEvent event) {
         System.out.println("[LoginController] Chuyển hướng sang màn hình chính (MainView)");
-        // switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
+         switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
     }
 }

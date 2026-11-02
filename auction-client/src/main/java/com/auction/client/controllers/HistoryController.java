@@ -249,8 +249,11 @@ public class HistoryController extends BaseController {
             switchToScene(event, "/views/AdminView.fxml", "Hệ thống Đấu giá - Kênh Quản trị viên (Admin)");
         } else if (currentUser instanceof Seller) {
             switchToScene(event, "/views/SellerView.fxml", "Hệ thống Đấu giá - Kênh Người bán (Seller)");
+        } else if (currentUser instanceof Bidder) {
+            // Điều hướng chính xác cho Bidder về lại Trang chủ
+            switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
         } else {
-            // Mặc định hoặc Bidder quay về Login/Kênh chung
+            // Dự phòng khi phiên rỗng hoặc chưa đăng nhập
             switchToScene(event, "/views/LoginView.fxml", "Hệ thống Đấu giá Trực tuyến - Đăng nhập");
         }
     }
