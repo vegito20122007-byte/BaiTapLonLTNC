@@ -9,37 +9,36 @@
         <groupId>com.auction</groupId>
         <artifactId>online-auction-system</artifactId>
         <version>1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>auction-client</artifactId>
+    <packaging>jar</packaging>
 
     <dependencies>
-        <!-- Phụ thuộc module auction-common chứa domain models -->
+        <!-- Module auction-common (ke thua version tu POM cha) -->
         <dependency>
             <groupId>com.auction</groupId>
             <artifactId>auction-common</artifactId>
-            <version>${project.version}</version>
         </dependency>
 
-        <!-- JavaFX Controls & FXML -->
+        <!-- JavaFX Controls & FXML (ke thua version tu POM cha) -->
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
-            <version>${javafx.version}</version>
         </dependency>
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-fxml</artifactId>
-            <version>${javafx.version}</version>
         </dependency>
 
-        <!-- Thu vien JSON Gson -->
+        <!-- Google Gson -->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
 
-        <!-- Kiem thu don vi JUnit 5 -->
+        <!-- JUnit 5 -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -49,7 +48,7 @@
 
     <build>
         <plugins>
-            <!-- Plugin giup chay JavaFX truc tiep bang lenh: mvn javafx:run -->
+            <!-- Plugin chay JavaFX: mvn javafx:run -->
             <plugin>
                 <groupId>org.openjfx</groupId>
                 <artifactId>javafx-maven-plugin</artifactId>
