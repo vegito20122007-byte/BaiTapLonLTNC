@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+
+<BorderPane fx:id="rootPane" prefHeight="650.0" prefWidth="950.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.auction.client.controllers.HistoryController">
+   <top>
+      <VBox BorderPane.alignment="CENTER">
+         <children>
+            <HBox alignment="CENTER_LEFT" spacing="15.0">
+               <padding>
+                  <Insets bottom="12.0" left="20.0" right="20.0" top="12.0" />
+               </padding>
+               <children>
+                  <Label text="LỊCH SỬ GIAO DỊCH &amp; ĐẶT GIÁ">
+                     <font>
+                        <Font name="System Bold" size="18.0" />
+                     </font>
+                  </Label>
+                  <Region HBox.hgrow="ALWAYS" />
+                  <Label text="Tài khoản:" textFill="#555555" />
+                  <Label fx:id="lblUsername" text="user">
+                     <font>
+                        <Font name="System Bold" size="13.0" />
+                     </font>
+                  </Label>
+                  <Separator orientation="VERTICAL" />
+                  <Button onAction="#backToMain" text="Quay lại" />
+                  <Separator orientation="VERTICAL" />
+                  <Button onAction="#handleLogout" text="Đăng xuất" />
+               </children>
+            </HBox>
+            <Separator />
+         </children>
+      </VBox>
+   </top>
+   <center>
+      <VBox spacing="10.0" BorderPane.alignment="CENTER">
+         <padding>
+            <Insets bottom="15.0" left="20.0" right="20.0" top="15.0" />
+         </padding>
+         <children>
+            <HBox alignment="CENTER_LEFT" spacing="10.0">
+               <children>
+                  <Label text="Tìm kiếm:">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <TextField fx:id="txtSearch" prefWidth="300.0" promptText="Tìm theo mã phiên, người đặt giá..." />
+                  <Button onAction="#handleSearch" text="Tìm kiếm" />
+                  <Button onAction="#loadData" text="Làm mới" />
+                  <Region HBox.hgrow="ALWAYS" />
+                  <Label fx:id="lblTotalCount" text="Tổng số giao dịch: 0" textFill="#2b5797">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+               </children>
+            </HBox>
+            <TableView fx:id="tableHistory" prefHeight="450.0" prefWidth="910.0" VBox.vgrow="ALWAYS">
+               <columns>
+                  <TableColumn fx:id="colId" prefWidth="100.0" text="Mã GD" />
+                  <TableColumn fx:id="colAuctionId" prefWidth="140.0" text="Mã phiên đấu giá" />
+                  <TableColumn fx:id="colBidder" prefWidth="180.0" text="Người đặt giá" />
+                  <TableColumn fx:id="colAmount" prefWidth="200.0" text="Mức giá đặt (VNĐ)" />
+                  <TableColumn fx:id="colTime" prefWidth="250.0" text="Thời gian đặt giá" />
+               </columns>
+            </TableView>
+            <HBox alignment="CENTER_LEFT" spacing="10.0">
+               <children>
+                  <Label fx:id="lblMessage" />
+                  <Region HBox.hgrow="ALWAYS" />
+                  <Label fx:id="lblTotalAmount" text="Tổng giá trị: 0 VNĐ" textFill="#2e7d32">
+                     <font>
+                        <Font name="System Bold" size="13.0" />
+                     </font>
+                  </Label>
+               </children>
+            </HBox>
+         </children>
+      </VBox>
+   </center>
+   <bottom>
+      <VBox BorderPane.alignment="CENTER">
+         <children>
+            <Separator />
+            <HBox alignment="CENTER_LEFT" spacing="15.0">
+               <padding>
+                  <Insets bottom="10.0" left="20.0" right="20.0" top="10.0" />
+               </padding>
+               <children>
+                  <Label text="Chi tiết giao dịch:" textFill="#555555">
+                     <font>
+                        <Font name="System Bold" size="12.0" />
+                     </font>
+                  </Label>
+                  <Label fx:id="lblDetail" text="Chọn một dòng trên bảng để xem chi tiết." />
+                  <Region HBox.hgrow="ALWAYS" />
+                  <Button onAction="#backToMain" text="Đóng" />
+               </children>
+            </HBox>
+         </children>
+      </VBox>
+   </bottom>
+</BorderPane>

@@ -96,16 +96,12 @@ public class RegisterController extends BaseController {
         System.out.println("[RegisterController] Tiến hành đăng ký tài khoản: " + username + " (" + roleCode + ")");
 
         try {
-            // =========================================================================
-            // TODO: GỬI REQUEST REGISTER SANG SERVER QUA NETWORKCLIENT
-            // =========================================================================
-
-            // GIẢ LẬP: Đăng ký thành công -> hiển thị thông báo và chuyển về Đăng nhập
+            // Giả lập đăng ký thành công phục vụ kiểm thử luồng UI độc lập
             showSuccess(lblMessage, "Đăng ký tài khoản thành công! Đang chuyển về Đăng nhập...");
             switchToLogin(event);
 
         } catch (Exception e) {
-            showError(lblMessage, "Lỗi kết nối khi đăng ký: " + e.getMessage());
+            showError(lblMessage, "Lỗi khi đăng ký: " + e.getMessage());
         }
     }
 

@@ -1,7 +1,10 @@
 package com.auction.client.controllers;
 
 import com.auction.client.session.SessionManager;
+import com.auction.model.Admin;
 import com.auction.model.Bidder;
+import com.auction.model.Seller;
+import com.auction.model.User;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -67,20 +70,31 @@ public class LoginController extends BaseController {
         System.out.println("[LoginController] Đang xử lý đăng nhập cho: " + username);
 
         try {
-            // =========================================================================
-            // TODO: GỬI REQUEST LOGIN QUA NETWORKCLIENT SANG SERVER
-            // =========================================================================
+            // Giả lập phiên đăng nhập theo phân quyền phục vụ kiểm thử luồng UI độc lập
+            User user;
+            if (username.toLowerCase().contains("admin")) {
+                user = new Admin(1, username, password);
+            } else if (username.toLowerCase().contains("bidder")) {
+                user = new Bidder(1, username, password);
+            } else {
+                user = new Seller(1, username, password);
+            }
 
-            // GIẢ LẬP: Lưu người dùng vào SessionManager
-            SessionManager.getInstance().setCurrentUser(new Bidder(1, username, password));
-            System.out.println("[LoginController] Đăng nhập thành công! Đã lưu Session.");
-            showSuccess(lblError, "Đăng nhập thành công!");
+            // Lưu User vào SessionManager
+            SessionManager.getInstance().setCurrentUser(user);
+            System.out.println("[LoginController] Đăng nhập thành công với vai trò: " + user.getClass().getSimpleName());
 
-            // Sau này chuyển sang màn hình chính:
-            // switchToMain(event);
+            // Điều hướng theo phân quyền
+            if (user instanceof Admin) {
+                switchToScene(event, "/views/AdminView.fxml", "Hệ thống Đấu giá - Kênh Quản trị viên (Admin)");
+            } else if (username.toLowerCase().contains("history")) {
+                switchToScene(event, "/views/HistoryView.fxml", "Hệ thống Đấu giá - Lịch sử giao dịch & đấu giá");
+            } else {
+                switchToScene(event, "/views/SellerView.fxml", "Hệ thống Đấu giá - Kênh Người bán (Seller)");
+            }
 
         } catch (Exception e) {
-            showError(lblError, "Lỗi kết nối Server: " + e.getMessage());
+            showError(lblError, "Lỗi điều hướng giao diện: " + e.getMessage());
         }
     }
 
