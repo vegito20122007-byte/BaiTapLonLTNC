@@ -28,6 +28,7 @@
                     </font>
                 </Label>
                 <Button onAction="#handleOpenAuctionRoom" style="-fx-background-color: #fbbc04; -fx-text-fill: #202124; -fx-font-weight: bold; -fx-cursor: hand;" text="⚡ Phòng đấu giá mẫu" />
+                <Button onAction="#handleOpenHistory" style="-fx-background-color: transparent; -fx-text-fill: white; -fx-border-color: white; -fx-border-radius: 4; -fx-cursor: hand;" text="📜 Lịch sử đấu giá" />
                 <Button onAction="#handleLogout" style="-fx-background-color: transparent; -fx-text-fill: white; -fx-border-color: white; -fx-border-radius: 4; -fx-cursor: hand;" text="Đăng xuất" />
             </children>
         </HBox>
