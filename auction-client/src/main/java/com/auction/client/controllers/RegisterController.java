@@ -1,5 +1,7 @@
 package com.auction.client.controllers;
 
+import com.auction.client.network.Message;
+import com.auction.client.network.NetworkClient;
 import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
@@ -9,6 +11,9 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Controller điều khiển giao diện Đăng ký (RegisterView.fxml).
@@ -96,12 +101,30 @@ public class RegisterController extends BaseController {
         System.out.println("[RegisterController] Tiến hành đăng ký tài khoản: " + username + " (" + roleCode + ")");
 
         try {
-            // Giả lập đăng ký thành công phục vụ kiểm thử luồng UI độc lập
-            showSuccess(lblMessage, "Đăng ký tài khoản thành công! Đang chuyển về Đăng nhập...");
-            switchToLogin(event);
+            // 1. Đóng gói dữ liệu đăng ký thành Message
+            Map<String, String> regData = new HashMap<>();
+            regData.put("username", username);
+            regData.put("password", password);
+            regData.put("role", roleCode);
+            Message regReq = Message.request(Message.ACTION_REGISTER, regData);
+
+            // 2. Gửi yêu cầu qua Socket TCP
+            Message response = NetworkClient.getInstance().sendRequest(regReq);
+
+            if (response != null && response.isSuccess()) {
+                showSuccess(lblMessage, "Đăng ký tài khoản thành công! Đang chuyển về Đăng nhập...");
+                switchToLogin(event);
+            } else if (response != null && response.getErrorMessage() != null && response.getErrorMessage().contains("Lỗi mạng")) {
+                // Server chưa chạy: mô phỏng đăng ký thành công để kiểm thử giao diện
+                System.out.println("[RegisterController] Server offline (" + response.getErrorMessage() + "), mô phỏng thành công cho kiểm thử UI.");
+                showSuccess(lblMessage, "Đăng ký thành công (Chế độ kiểm thử)! Đang chuyển về Đăng nhập...");
+                switchToLogin(event);
+            } else {
+                showError(lblMessage, response != null ? response.getErrorMessage() : "Đăng ký tài khoản thất bại!");
+            }
 
         } catch (Exception e) {
-            showError(lblMessage, "Lỗi khi đăng ký: " + e.getMessage());
+            showError(lblMessage, "Lỗi kết nối khi đăng ký: " + e.getMessage());
         }
     }
 

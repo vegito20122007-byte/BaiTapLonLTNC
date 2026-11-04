@@ -1,5 +1,6 @@
 package com.auction.client.controllers;
 
+import com.auction.client.util.GsonConfig;
 import com.google.gson.Gson;
 import javafx.event.Event;
 import javafx.fxml.FXMLLoader;
@@ -23,7 +24,8 @@ import java.io.IOException;
  */
 public abstract class BaseController {
 
-    protected Gson gson = new Gson();
+    // Đối tượng Gson dùng chung cho tất cả các Controller con
+    protected Gson gson = GsonConfig.getGson();
 
     /**
      * Chuyển đổi màn hình hiển thị trong ứng dụng (nhận Event đa năng).
