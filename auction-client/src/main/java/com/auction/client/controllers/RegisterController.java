@@ -2,6 +2,7 @@ package com.auction.client.controllers;
 
 import com.auction.client.network.Message;
 import com.auction.client.network.NetworkClient;
+import com.auction.client.util.ValidationUtils;
 import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
@@ -55,7 +56,8 @@ public class RegisterController extends BaseController {
                 "Người đấu giá (BIDDER)",
                 "Người bán hàng (SELLER)"
         ));
-        cbRole.getSelectionModel().selectFirst();
+        // Mặc định không chọn trước vai trò, bắt buộc người dùng chủ động chọn
+        cbRole.setValue(null);
 
         clearMessage(lblMessage);
         setupFocusClear(rootPane, cardBox);
@@ -77,26 +79,43 @@ public class RegisterController extends BaseController {
         String confirmPassword = txtConfirmPassword.getText().trim();
         String selectedRole = cbRole.getValue();
 
-        // 1. Kiểm tra rỗng
+        // 1. Kiểm tra rỗng các trường bắt buộc
         if (username.isEmpty() || password.isEmpty() || confirmPassword.isEmpty()) {
             showError(lblMessage, "Vui lòng nhập đầy đủ tất cả các trường thông tin!");
             return;
         }
 
-        // 2. Kiểm tra độ dài mật khẩu
-        if (password.length() < 6) {
-            showError(lblMessage, "Mật khẩu phải chứa ít nhất 6 ký tự!");
+        // 2. Kiểm tra định dạng username (độ dài >= 3, không chứa khoảng trắng hay ký tự đặc biệt)
+        if (username.length() < ValidationUtils.MIN_USERNAME_LENGTH) {
+            showError(lblMessage, "Tên đăng nhập phải chứa ít nhất " + ValidationUtils.MIN_USERNAME_LENGTH + " ký tự!");
             return;
         }
 
-        // 3. Kiểm tra mật khẩu xác nhận
+        if (!ValidationUtils.isValidUsername(username)) {
+            showError(lblMessage, "Tên đăng nhập không được chứa khoảng trắng hoặc ký tự đặc biệt!");
+            return;
+        }
+
+        // 3. Bắt buộc người dùng chủ động chọn vai trò
+        if (!ValidationUtils.isValidRole(selectedRole)) {
+            showError(lblMessage, "Vui lòng chủ động chọn vai trò tài khoản (Bidder hoặc Seller)!");
+            return;
+        }
+
+        // 4. Kiểm tra độ dài mật khẩu (ít nhất 6 ký tự)
+        if (password.length() < ValidationUtils.MIN_PASSWORD_LENGTH) {
+            showError(lblMessage, "Mật khẩu phải chứa ít nhất " + ValidationUtils.MIN_PASSWORD_LENGTH + " ký tự!");
+            return;
+        }
+
+        // 5. Kiểm tra mật khẩu xác nhận
         if (!password.equals(confirmPassword)) {
             showError(lblMessage, "Mật khẩu xác nhận không khớp!");
             return;
         }
 
-        // 4. Lấy mã vai trò chuẩn (BIDDER hoặc SELLER)
-        String roleCode = selectedRole != null && selectedRole.contains("SELLER") ? "SELLER" : "BIDDER";
+        // 6. Lấy mã vai trò chuẩn (BIDDER hoặc SELLER)
+        String roleCode = selectedRole.contains("SELLER") ? "SELLER" : "BIDDER";
 
         System.out.println("[RegisterController] Tiến hành đăng ký tài khoản: " + username + " (" + roleCode + ")");
 

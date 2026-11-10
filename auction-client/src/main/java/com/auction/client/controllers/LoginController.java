@@ -3,6 +3,7 @@ package com.auction.client.controllers;
 import com.auction.client.network.Message;
 import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
+import com.auction.client.util.ValidationUtils;
 import com.auction.model.Admin;
 import com.auction.model.Bidder;
 import com.auction.model.Seller;
@@ -65,9 +66,21 @@ public class LoginController extends BaseController {
         String username = txtUsername.getText().trim();
         String password = txtPassword.getText().trim();
 
-        // 1. Kiểm tra validation
+        // 1. Kiểm tra validation không để trống
         if (username.isEmpty() || password.isEmpty()) {
             showError(lblError, "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!");
+            return;
+        }
+
+        // 2. Kiểm tra độ dài tối thiểu của username (ít nhất 3 ký tự)
+        if (username.length() < ValidationUtils.MIN_USERNAME_LENGTH) {
+            showError(lblError, "Tên đăng nhập phải chứa ít nhất " + ValidationUtils.MIN_USERNAME_LENGTH + " ký tự!");
+            return;
+        }
+
+        // 3. Kiểm tra ký tự không hợp lệ (không chứa khoảng trắng hoặc ký tự đặc biệt)
+        if (!ValidationUtils.isValidUsername(username)) {
+            showError(lblError, "Tên đăng nhập không được chứa khoảng trắng hoặc ký tự đặc biệt!");
             return;
         }
 
