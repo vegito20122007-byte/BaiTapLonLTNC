@@ -319,6 +319,11 @@ public class MainController extends BaseController {
             }
         });
     }
+    @FXML
+    public void handleOpenHistory(ActionEvent event) {
+        cleanupListener();
+        switchToScene(event, "/views/HistoryView.fxml", "Hệ thống Đấu giá - Lịch sử giao dịch & đấu giá");
+    }
 
     private void cleanupListener() {
         if (realtimeListener != null) {
