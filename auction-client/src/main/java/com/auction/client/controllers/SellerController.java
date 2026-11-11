@@ -2,6 +2,7 @@ package com.auction.client.controllers;
 
 import com.auction.client.session.SessionManager;
 import com.auction.client.util.ImageUtils;
+import com.auction.client.util.ValidationUtils;
 import com.auction.model.*;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -97,21 +98,23 @@ public class SellerController extends BaseController {
     @FXML
     private Label lblMessage;
 
-    // ==========================================
-    // 2. THUỘC TÍNH THEO SƠ ĐỒ UML
-    // ==========================================
+    // Danh sách quan sát chứa dữ liệu các phiên đấu giá
     private ObservableList<Auction> auctionDataList = FXCollections.observableArrayList();
+
+    // Chuỗi mã hóa ảnh Base64
     private String encodedImage;
+
+    // Bộ sinh ID tạm thời phục vụ kiểm thử dữ liệu cục bộ
     private static final AtomicInteger AUTO_ID_GEN = new AtomicInteger(100);
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     /**
-     * Khởi tạo bảng dữ liệu và các bộ chọn khi mở màn hình Seller.
+     * Vòng đời khởi tạo giao diện.
      */
     @FXML
     public void initialize() {
-        // Cấu hình các danh mục hàng hóa theo ItemFactory
+        // Cấu hình ComboBox danh mục
         cbCategory.setItems(FXCollections.observableArrayList("ART", "ELECTRONICS", "VEHICLE"));
         cbCategory.getSelectionModel().selectFirst();
 
@@ -198,15 +201,17 @@ public class SellerController extends BaseController {
             try {
                 // Mã hóa ảnh sang Base64 qua ImageUtils
                 this.encodedImage = ImageUtils.fileToBase64(selectedFile);
-
-                // Hiển thị xem trước ảnh ngay trên ImageView
                 imgPreview.setImage(ImageUtils.base64ToImage(this.encodedImage));
-                showSuccess(lblMessage, "Đã chọn ảnh: " + selectedFile.getName());
+                showSuccess(lblMessage, "Đã tải ảnh: " + selectedFile.getName());
             } catch (Exception e) {
                 showError(lblMessage, "Lỗi đọc file ảnh: " + e.getMessage());
             }
         }
     }
+
+    // ==========================================
+    // 2. XỬ LÝ SỰ KIỆN NÚT BẤM (onAction)
+    // ==========================================
 
     /**
      * Thêm một phiên đấu giá mới (theo sơ đồ UML).
@@ -222,7 +227,7 @@ public class SellerController extends BaseController {
         String reservePriceStr = txtReservePrice.getText().trim();
         String durationStr = txtDurationMinutes.getText().trim();
 
-        // 1. Validation kiểm tra rỗng
+        // 1. Validation kiểm tra rỗng các trường bắt buộc
         if (name.isEmpty() || startPriceStr.isEmpty() || durationStr.isEmpty()) {
             showError(lblMessage, "Vui lòng nhập tên, giá khởi điểm và thời lượng phiên!");
             return;
@@ -230,33 +235,44 @@ public class SellerController extends BaseController {
 
         try {
             double startPrice = Double.parseDouble(startPriceStr);
-            double reservePrice = reservePriceStr.isEmpty() ? startPrice : Double.parseDouble(reservePriceStr);
-            int durationMinutes = Integer.parseInt(durationStr);
-
-            if (startPrice <= 0 || durationMinutes <= 0) {
-                showError(lblMessage, "Giá và thời lượng phải lớn hơn 0!");
+            if (startPrice <= 0) {
+                showError(lblMessage, "Giá khởi điểm phải lớn hơn 0!");
                 return;
             }
 
-            // 2. Lấy thông tin Seller từ Session
+            // 2. Kiểm tra giá bảo lưu: nếu để trống thì mặc định bằng giá khởi điểm; nếu có nhập thì phải >= giá khởi điểm
+            double reservePrice = reservePriceStr.isEmpty() ? startPrice : Double.parseDouble(reservePriceStr);
+            if (!ValidationUtils.isValidReservePrice(startPrice, reservePrice)) {
+                showError(lblMessage, "Giá bảo lưu không được nhỏ hơn giá khởi điểm (" + String.format("%,.0f VNĐ", startPrice) + ")!");
+                return;
+            }
+
+            // 3. Kiểm tra giới hạn thời lượng phiên: tối thiểu 5 phút, tối đa 30 ngày (43.200 phút)
+            int durationMinutes = Integer.parseInt(durationStr);
+            if (!ValidationUtils.isValidAuctionDuration(durationMinutes)) {
+                showError(lblMessage, "Thời lượng phiên đấu giá phải từ 5 phút đến tối đa 30 ngày (43.200 phút)!");
+                return;
+            }
+
+            // 4. Lấy thông tin Seller từ Session
             User currentUser = SessionManager.getInstance().getCurrentUser();
             Seller seller = (currentUser instanceof Seller) ? (Seller) currentUser : new Seller(1, "seller_user", "pass");
 
-            // 3. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP
+            // 5. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP (Ảnh là Optional)
             int newItemId = AUTO_ID_GEN.incrementAndGet();
             Item item = ItemFactory.createItem(category, newItemId, name, description, seller);
             if (this.encodedImage != null) {
                 item.setImageData(this.encodedImage);
             }
 
-            // 4. Tạo đối tượng Auction mới
+            // 6. Tạo đối tượng Auction mới
             int newAuctionId = newItemId;
             LocalDateTime startTime = LocalDateTime.now();
             LocalDateTime endTime = startTime.plusMinutes(durationMinutes);
 
             Auction newAuction = new Auction(newAuctionId, name, item, seller, startPrice, reservePrice, startTime, endTime);
 
-            // 5. Thêm vào danh sách quan sát
+            // 7. Thêm vào danh sách quan sát
             auctionDataList.add(newAuction);
             auctionTableView.refresh();
 
@@ -293,6 +309,11 @@ public class SellerController extends BaseController {
 
         try {
             double startPrice = Double.parseDouble(startPriceStr);
+            if (startPrice <= 0) {
+                showError(lblMessage, "Giá khởi điểm phải lớn hơn 0!");
+                return;
+            }
+
             selected.setName(name);
             selected.setStartingPrice(startPrice);
 

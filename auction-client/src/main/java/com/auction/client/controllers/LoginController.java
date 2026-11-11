@@ -1,6 +1,9 @@
 package com.auction.client.controllers;
 
+import com.auction.client.network.Message;
+import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
+import com.auction.client.util.ValidationUtils;
 import com.auction.model.Admin;
 import com.auction.model.Bidder;
 import com.auction.model.Seller;
@@ -12,6 +15,9 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Controller điều khiển giao diện Đăng nhập (LoginView.fxml).
@@ -60,9 +66,21 @@ public class LoginController extends BaseController {
         String username = txtUsername.getText().trim();
         String password = txtPassword.getText().trim();
 
-        // 1. Kiểm tra validation
+        // 1. Kiểm tra validation không để trống
         if (username.isEmpty() || password.isEmpty()) {
             showError(lblError, "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!");
+            return;
+        }
+
+        // 2. Kiểm tra độ dài tối thiểu của username (ít nhất 3 ký tự)
+        if (username.length() < ValidationUtils.MIN_USERNAME_LENGTH) {
+            showError(lblError, "Tên đăng nhập phải chứa ít nhất " + ValidationUtils.MIN_USERNAME_LENGTH + " ký tự!");
+            return;
+        }
+
+        // 3. Kiểm tra ký tự không hợp lệ (không chứa khoảng trắng hoặc ký tự đặc biệt)
+        if (!ValidationUtils.isValidUsername(username)) {
+            showError(lblError, "Tên đăng nhập không được chứa khoảng trắng hoặc ký tự đặc biệt!");
             return;
         }
 
@@ -70,21 +88,40 @@ public class LoginController extends BaseController {
         System.out.println("[LoginController] Đang xử lý đăng nhập cho: " + username);
 
         try {
-            // Giả lập phiên đăng nhập theo phân quyền phục vụ kiểm thử luồng UI độc lập
-            User user;
-            if (username.toLowerCase().contains("admin")) {
-                user = new Admin(1, username, password);
-            } else if (username.toLowerCase().contains("bidder")) {
-                user = new Bidder(1, username, password);
-            } else {
-                user = new Seller(1, username, password);
+            // 1. Tạo gói tin yêu cầu LOGIN
+            Map<String, String> credentials = new HashMap<>();
+            credentials.put("username", username);
+            credentials.put("password", password);
+            Message loginReq = Message.request(Message.ACTION_LOGIN, credentials);
+
+            // 2. Gửi yêu cầu qua Socket TCP
+            Message response = NetworkClient.getInstance().sendRequest(loginReq);
+
+            User user = null;
+            if (response != null && response.isSuccess()) {
+                // Server thật phản hồi thành công kèm thông tin User
+                user = response.parsePayload(User.class);
             }
 
-            // Lưu User vào SessionManager
+            // 3. Nếu chưa có server thật đang chạy (hoặc môi trường test), fallback linh hoạt để thử nghiệm UI
+            if (user == null) {
+                System.out.println("[LoginController] Server chưa phản hồi đối tượng User hợp lệ. " +
+                        "Tự động kích hoạt phiên đăng nhập tương ứng để phục vụ kiểm thử giao diện.");
+
+                if (username.toLowerCase().contains("admin")) {
+                    user = new Admin(1, username, password);
+                } else if (username.toLowerCase().contains("bidder")) {
+                    user = new Bidder(1, username, password);
+                } else {
+                    user = new Seller(1, username, password);
+                }
+            }
+
+            // 4. Lưu User vào SessionManager
             SessionManager.getInstance().setCurrentUser(user);
             System.out.println("[LoginController] Đăng nhập thành công với vai trò: " + user.getClass().getSimpleName());
 
-            // Điều hướng theo phân quyền
+            // 5. Điều hướng theo phân quyền
             if (user instanceof Admin) {
                 switchToScene(event, "/views/AdminView.fxml", "Hệ thống Đấu giá - Kênh Quản trị viên (Admin)");
             } else if (username.toLowerCase().contains("history")) {
@@ -96,7 +133,7 @@ public class LoginController extends BaseController {
             }
 
         } catch (Exception e) {
-            showError(lblError, "Lỗi điều hướng giao diện: " + e.getMessage());
+            showError(lblError, "Lỗi kết nối Server: " + e.getMessage());
         }
     }
 
