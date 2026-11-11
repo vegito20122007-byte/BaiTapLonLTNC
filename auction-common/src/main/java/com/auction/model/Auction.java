@@ -1,5 +1,8 @@
 package com.auction.model;
 
+import com.auction.exception.AuctionClosedException;
+import com.auction.exception.InvalidBidException;
+
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,34 +78,38 @@ public class Auction extends Entity {
      *
      * @param bidder Người đặt giá
      * @param amount Số tiền muốn đặt
-     * @throws IllegalArgumentException nếu giá không hợp lệ hoặc người bán tự bid
-     * @throws IllegalStateException nếu phiên chưa mở hoặc đã kết thúc
+     * @throws AuctionClosedException nếu phiên chưa mở hoặc đã kết thúc
+     * @throws InvalidBidException nếu giá không hợp lệ hoặc người bán tự bid
      */
     public synchronized void placeBid(User bidder, double amount) {
         updateStatus();
 
         if (status != Status.RUNNING) {
-            throw new IllegalStateException("Phiên đấu giá hiện không mở để nhận giá (Trạng thái: " + status + ")");
+            throw new AuctionClosedException("Phiên đấu giá hiện không mở để nhận giá (Trạng thái: " + status + ")");
         }
 
         if (bidder == null || bidder.getId() == null) {
-            throw new IllegalArgumentException("Thông tin người đặt giá không hợp lệ");
+            throw new InvalidBidException("Thông tin người đặt giá không hợp lệ");
         }
 
         // Quy tắc: Người bán không được tự đặt giá sản phẩm của chính mình
         if (seller != null && seller.getId().equals(bidder.getId())) {
-            throw new IllegalArgumentException("Người bán không thể tự đặt giá cho sản phẩm của mình");
+            throw new InvalidBidException("Người bán không thể tự đặt giá cho sản phẩm của mình");
+        }
+
+        if (amount <= 0) {
+            throw new InvalidBidException("Số tiền đặt giá phải lớn hơn 0");
         }
 
         // Quy tắc: Nếu chưa có ai bid thì giá phải >= giá khởi điểm; nếu đã có bid thì phải > giá cao nhất hiện tại
         double currentPrice = getCurrentPrice();
         if (bids.isEmpty()) {
             if (amount < startingPrice) {
-                throw new IllegalArgumentException(String.format("Giá đặt (%,.0f) phải lớn hơn hoặc bằng giá khởi điểm (%,.0f)", amount, startingPrice));
+                throw new InvalidBidException(String.format("Giá đặt (%,.0f) phải lớn hơn hoặc bằng giá khởi điểm (%,.0f)", amount, startingPrice));
             }
         } else {
             if (amount <= currentPrice) {
-                throw new IllegalArgumentException(String.format("Giá đặt (%,.0f) phải cao hơn mức giá hiện tại (%,.0f)", amount, currentPrice));
+                throw new InvalidBidException(String.format("Giá đặt (%,.0f) phải cao hơn mức giá hiện tại (%,.0f)", amount, currentPrice));
             }
         }
 
