@@ -149,4 +149,19 @@ public class ImageUtilsTest {
     void testLoadImageNonExistentFileThrowsException() {
         assertThrows(IllegalArgumentException.class, () -> ImageUtils.loadImageFromServer("path/to/never_exists_image.png"));
     }
+
+    @Test
+    @DisplayName("Biên: saveImageToServer gọi liên tiếp trong cùng mili-giây không được trùng tên hay ghi đè")
+    void testImageUtilsSameMillisecondCollision() throws IOException {
+        java.util.Set<String> uniquePaths = new java.util.HashSet<>();
+        int attempts = 20;
+        for (int i = 0; i < attempts; i++) {
+            String b64 = ImageUtils.bytesToBase64(("IMAGE_DATA_" + i).getBytes(StandardCharsets.UTF_8));
+            String path = ImageUtils.saveImageToServer(b64, "ItemA");
+            uniquePaths.add(path);
+        }
+
+        assertEquals(attempts, uniquePaths.size(),
+                "Lưu " + attempts + " ảnh liên tiếp phải tạo đủ " + attempts + " file riêng biệt, không được ghi đè nhau!");
+    }
 }

@@ -21,9 +21,13 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
@@ -72,6 +76,13 @@ public class NetworkClient {
     // Danh sách đăng ký Observer lắng nghe sự kiện Realtime từ Server
     private final List<Consumer<Message>> listeners = new CopyOnWriteArrayList<>();
 
+    // Bộ lập lịch timeout riêng cho từng yêu cầu bất đồng bộ (Daemon thread)
+    private final ScheduledExecutorService timeoutScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "NetworkClient-TimeoutScheduler");
+        t.setDaemon(true);
+        return t;
+    });
+
     /**
      * Hàm dựng private đảm bảo tính chất Singleton.
      */
@@ -119,7 +130,10 @@ public class NetworkClient {
      * @param port cổng kết nối TCP
      */
     public synchronized void configure(String host, int port) {
-        if (!this.host.equals(host) || this.port != port) {
+        if (host == null || host.isBlank()) {
+            return;
+        }
+        if (!Objects.equals(this.host, host) || this.port != port) {
             disconnect();
             this.host = host;
             this.port = port;
@@ -144,6 +158,12 @@ public class NetworkClient {
         if (isConnected()) {
             return;
         }
+        if (host == null || host.isBlank()) {
+            throw new IOException("Địa chỉ máy chủ (host) không hợp lệ.");
+        }
+        if (port < 1 || port > 65535) {
+            throw new IOException("Cổng kết nối không hợp lệ: " + port);
+        }
 
         socket = new Socket();
         socket.connect(new InetSocketAddress(host, port), timeoutMs);
@@ -167,7 +187,7 @@ public class NetworkClient {
     public synchronized void connectOrThrow() {
         try {
             connect();
-        } catch (IOException e) {
+        } catch (IOException | IllegalArgumentException e) {
             throw new ConnectionException(
                     "Không thể kết nối tới máy chủ (" + host + ":" + port + "): " + e.getMessage(), e);
         }
@@ -219,6 +239,7 @@ public class NetworkClient {
         String a = action.trim().toUpperCase();
         return Message.ACTION_BID_UPDATE.equals(a)
                 || Message.ACTION_AUCTION_UPDATE.equals(a)
+                || Message.ACTION_DELETE_AUCTION.equals(a)
                 || Message.ACTION_CHAT.equals(a);
     }
 
@@ -300,19 +321,36 @@ public class NetworkClient {
      * @return CompletableFuture chứa kết quả Message phản hồi
      */
     public CompletableFuture<Message> sendRequestAsync(Message request) {
+        return sendRequestInternal(request).future;
+    }
+
+    private PendingRequest sendRequestInternal(Message request) {
         if (request == null) {
-            return CompletableFuture.completedFuture(createErrorResponse("UNKNOWN", "Request không được để null!"));
+            return new PendingRequest("UNKNOWN",
+                    CompletableFuture.completedFuture(createErrorResponse("UNKNOWN", "Request không được để null!")));
         }
 
         CompletableFuture<Message> future = new CompletableFuture<>();
+        PendingRequest pending = new PendingRequest(request.getAction(), future);
+        ScheduledFuture<?> timeoutTask = null;
 
         try {
             if (!isConnected()) {
                 connect();
             }
 
-            PendingRequest pending = new PendingRequest(request.getAction(), future);
+            long effectiveTimeout = Math.max(1L, this.timeoutMs);
             pendingRequests.add(pending);
+
+            timeoutTask = timeoutScheduler.schedule(() -> {
+                if (!future.isDone()) {
+                    pendingRequests.remove(pending);
+                    future.complete(createErrorResponse(request.getAction(),
+                            "Lỗi mạng hoặc không thể kết nối tới Server (" + host + ":" + port + "): Read timed out"));
+                }
+            }, effectiveTimeout, TimeUnit.MILLISECONDS);
+            final ScheduledFuture<?> scheduledRef = timeoutTask;
+            future.whenComplete((res, ex) -> scheduledRef.cancel(false));
 
             String jsonRequest = gson.toJson(request);
             synchronized (outLock) {
@@ -325,19 +363,27 @@ public class NetworkClient {
             System.out.println("[NetworkClient] Gửi: " + jsonRequest);
 
         } catch (IOException e) {
+            if (timeoutTask != null) {
+                timeoutTask.cancel(false);
+            }
+            pendingRequests.remove(pending);
             System.err.println("[NetworkClient] Lỗi truyền thông Socket: " + e.getMessage());
             disconnect();
-            return CompletableFuture.completedFuture(
+            return new PendingRequest(request.getAction(), CompletableFuture.completedFuture(
                     createErrorResponse(request.getAction(), "Lỗi mạng hoặc không thể kết nối tới Server (" + host + ":" + port + "): " + e.getMessage())
-            );
+            ));
         } catch (Exception e) {
+            if (timeoutTask != null) {
+                timeoutTask.cancel(false);
+            }
+            pendingRequests.remove(pending);
             System.err.println("[NetworkClient] Lỗi xử lý yêu cầu: " + e.getMessage());
-            return CompletableFuture.completedFuture(
+            return new PendingRequest(request.getAction(), CompletableFuture.completedFuture(
                     createErrorResponse(request.getAction(), "Lỗi xử lý yêu cầu: " + e.getMessage())
-            );
+            ));
         }
 
-        return future;
+        return pending;
     }
 
     /**
@@ -351,17 +397,19 @@ public class NetworkClient {
             return createErrorResponse("UNKNOWN", "Request không được để null!");
         }
 
+        PendingRequest pending = sendRequestInternal(request);
         try {
-            return sendRequestAsync(request).get(timeoutMs, TimeUnit.MILLISECONDS);
+            return pending.future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             System.err.println("[NetworkClient] Lỗi truyền thông Socket: Read timed out");
-            pendingRequests.removeIf(p -> p.action != null && p.action.equalsIgnoreCase(request.getAction()));
+            pendingRequests.remove(pending);
             return createErrorResponse(request.getAction(), "Lỗi mạng hoặc không thể kết nối tới Server (" + host + ":" + port + "): Read timed out");
         } catch (ExecutionException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             return createErrorResponse(request.getAction(), "Lỗi thực thi: " + cause.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            pendingRequests.remove(pending);
             return createErrorResponse(request.getAction(), "Yêu cầu bị gián đoạn: " + e.getMessage());
         }
     }
@@ -409,7 +457,8 @@ public class NetworkClient {
             return new ConnectionException(err);
         }
         if (Message.ACTION_LOGIN.equals(action) || Message.ACTION_REGISTER.equals(action)) {
-            if (lowerErr.contains("để trống") || lowerErr.contains("nhập đầy đủ")) {
+            if (lowerErr.contains("để trống") || lowerErr.contains("nhập đầy đủ")
+                    || lowerErr.contains("không hợp lệ") || lowerErr.contains("không được trống")) {
                 return new DataValidationException(err);
             }
             return new AuthenticationException(err);
@@ -418,7 +467,8 @@ public class NetworkClient {
             return new AuctionNotFoundException(err);
         }
         if (lowerErr.contains("không mở để nhận giá") || lowerErr.contains("đã kết thúc")
-                || lowerErr.contains("finished") || lowerErr.contains("canceled")) {
+                || lowerErr.contains("đã đóng") || lowerErr.contains("chưa mở")
+                || lowerErr.contains("closed") || lowerErr.contains("finished") || lowerErr.contains("canceled")) {
             return new AuctionClosedException(err);
         }
         if (lowerErr.contains("số dư")) {

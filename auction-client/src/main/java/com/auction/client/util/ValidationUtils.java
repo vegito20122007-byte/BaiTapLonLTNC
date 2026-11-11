@@ -78,7 +78,8 @@ public final class ValidationUtils {
      * @return true nếu startPrice > 0 và reservePrice >= startPrice
      */
     public static boolean isValidReservePrice(double startPrice, double reservePrice) {
-        return startPrice > 0 && reservePrice >= startPrice;
+        return Double.isFinite(startPrice) && Double.isFinite(reservePrice)
+                && startPrice > 0 && reservePrice >= startPrice;
     }
 
     /**
@@ -132,8 +133,8 @@ public final class ValidationUtils {
         if (name == null || name.trim().isEmpty()) {
             throw new DataValidationException("Tên phiên đấu giá không được để trống!");
         }
-        if (startPrice <= 0) {
-            throw new DataValidationException("Giá khởi điểm phải lớn hơn 0!");
+        if (!Double.isFinite(startPrice) || startPrice <= 0) {
+            throw new DataValidationException("Giá khởi điểm phải là số hữu hạn lớn hơn 0!");
         }
         if (!isValidReservePrice(startPrice, reservePrice)) {
             throw new DataValidationException("Giá bảo lưu không được nhỏ hơn giá khởi điểm ("
@@ -149,8 +150,12 @@ public final class ValidationUtils {
      * Kiểm tra giá đặt hợp lệ theo bước giá tối thiểu, ném {@link InvalidBidException} nếu vi phạm.
      */
     public static void validateBidAmount(double bidValue, double currentPrice, double minIncrement) {
-        if (bidValue <= 0) {
-            throw new InvalidBidException("Số tiền đặt giá phải lớn hơn 0!");
+        if (!Double.isFinite(bidValue) || bidValue <= 0) {
+            throw new InvalidBidException("Số tiền đặt giá phải là số hữu hạn lớn hơn 0!");
+        }
+        if (!Double.isFinite(currentPrice) || currentPrice < 0
+                || !Double.isFinite(minIncrement) || minIncrement <= 0) {
+            throw new InvalidBidException("Giá hiện tại và bước giá tối thiểu phải là số hữu hạn hợp lệ!");
         }
         double minValidBid = currentPrice + minIncrement;
         if (bidValue < minValidBid) {

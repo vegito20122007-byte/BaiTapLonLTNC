@@ -184,4 +184,21 @@ class ValidationUtilsTest {
         assertThrows(InvalidBidException.class, () -> ValidationUtils.validateBidAmount(5050000, 5000000, 100000));
         assertDoesNotThrow(() -> ValidationUtils.validateBidAmount(5100000, 5000000, 100000));
     }
+
+    @Test
+    @DisplayName("ValidationUtils chặn Double.NaN, POSITIVE_INFINITY và minIncrement âm")
+    void testValidationUtilsFloatingPointAndNegativeEdgeCases() {
+        assertThrows(InvalidBidException.class,
+                () -> ValidationUtils.validateBidAmount(Double.NaN, 1_000_000, 100_000));
+        assertThrows(InvalidBidException.class,
+                () -> ValidationUtils.validateBidAmount(Double.POSITIVE_INFINITY, 1_000_000, 100_000));
+        assertThrows(InvalidBidException.class,
+                () -> ValidationUtils.validateBidAmount(500_000, 1_000_000, -900_000));
+        assertThrows(InvalidBidException.class,
+                () -> ValidationUtils.validateBidAmount(500_000, -100, 100_000));
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateAuctionCreation("Sản phẩm", Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, 60));
+        assertFalse(ValidationUtils.isValidReservePrice(Double.NaN, 1_000_000));
+        assertFalse(ValidationUtils.isValidReservePrice(1_000_000, Double.POSITIVE_INFINITY));
+    }
 }

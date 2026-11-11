@@ -9,6 +9,7 @@ import com.auction.model.Item;
 import com.auction.model.Seller;
 import com.auction.model.User;
 import com.google.gson.Gson;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonSyntaxException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -146,5 +147,22 @@ class GsonConfigTest {
         assertEquals(endTime, parsedAuction.getEndTime());
         assertEquals(1, parsedAuction.getBids().size());
         assertEquals(55000000.0, parsedAuction.getBids().get(0).getAmount());
+    }
+
+    @Test
+    @DisplayName("Ngoại lệ: GsonConfig ném JsonParseException khi role/category lạ hoặc JSON không phải Object")
+    void testGsonConfigInvalidRoleAndNonObjectJson() {
+        String weirdRoleJson = "{\"id\":99,\"username\":\"intruder\",\"role\":\"SUPER_HACKER\"}";
+        assertThrows(JsonParseException.class,
+                () -> GsonConfig.getGson().fromJson(weirdRoleJson, User.class));
+
+        String weirdCategoryJson = "{\"id\":10,\"name\":\"Món lạ\",\"category\":\"FOOD\"}";
+        assertThrows(JsonParseException.class,
+                () -> GsonConfig.getGson().fromJson(weirdCategoryJson, Item.class));
+
+        assertThrows(JsonParseException.class,
+                () -> GsonConfig.getGson().fromJson("\"just_a_string\"", User.class));
+        assertThrows(JsonParseException.class,
+                () -> GsonConfig.getGson().fromJson("[1,2,3]", Item.class));
     }
 }

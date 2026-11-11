@@ -12,6 +12,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonDeserializer;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
@@ -58,20 +59,27 @@ public class GsonConfig {
                 if (json == null || json.isJsonNull()) {
                     return null;
                 }
+                if (!json.isJsonObject()) {
+                    throw new JsonParseException("Dữ liệu User phải là JSON Object hợp lệ.");
+                }
                 JsonObject obj = json.getAsJsonObject();
                 String role = obj.has("role") && !obj.get("role").isJsonNull() ? obj.get("role").getAsString() : "BIDDER";
                 if ("ADMIN".equalsIgnoreCase(role)) {
                     return context.deserialize(json, Admin.class);
                 } else if ("SELLER".equalsIgnoreCase(role)) {
                     return context.deserialize(json, Seller.class);
-                } else {
+                } else if ("BIDDER".equalsIgnoreCase(role)) {
                     return context.deserialize(json, Bidder.class);
                 }
+                throw new JsonParseException("Vai trò User không hợp lệ: " + role);
             })
             // 3. Deserializer đa hình cho Item (Lớp trừu tượng)
             .registerTypeAdapter(Item.class, (JsonDeserializer<Item>) (json, typeOfT, context) -> {
                 if (json == null || json.isJsonNull()) {
                     return null;
+                }
+                if (!json.isJsonObject()) {
+                    throw new JsonParseException("Dữ liệu Item phải là JSON Object hợp lệ.");
                 }
                 JsonObject obj = json.getAsJsonObject();
                 String category = obj.has("category") && !obj.get("category").isJsonNull() ? obj.get("category").getAsString() : "ELECTRONICS";
@@ -79,9 +87,10 @@ public class GsonConfig {
                     return context.deserialize(json, Art.class);
                 } else if ("VEHICLE".equalsIgnoreCase(category)) {
                     return context.deserialize(json, Vehicle.class);
-                } else {
+                } else if ("ELECTRONICS".equalsIgnoreCase(category)) {
                     return context.deserialize(json, Electronics.class);
                 }
+                throw new JsonParseException("Danh mục Item không hợp lệ: " + category);
             })
             .serializeNulls()
             .create();

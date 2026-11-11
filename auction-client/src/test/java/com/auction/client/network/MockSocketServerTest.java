@@ -11,19 +11,28 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -34,20 +43,23 @@ class MockSocketServerTest {
     private int mockPort;
     private ExecutorService serverExecutor;
     private volatile boolean running = true;
+    private final List<Socket> acceptedSockets = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void setUp() throws IOException {
+        resetNetworkClientHostIfNull();
         // Mở ServerSocket trên cổng động có sẵn
         mockServerSocket = new ServerSocket(0);
         mockPort = mockServerSocket.getLocalPort();
         running = true;
 
-        serverExecutor = Executors.newSingleThreadExecutor();
+        serverExecutor = Executors.newCachedThreadPool();
         serverExecutor.submit(() -> {
             try {
                 while (running && !mockServerSocket.isClosed()) {
                     Socket clientSocket = mockServerSocket.accept();
-                    handleClient(clientSocket);
+                    acceptedSockets.add(clientSocket);
+                    serverExecutor.submit(() -> handleClient(clientSocket));
                 }
             } catch (IOException ignored) {
             }
@@ -58,12 +70,43 @@ class MockSocketServerTest {
         NetworkClient.getInstance().setTimeoutMs(3000);
     }
 
+    private void resetNetworkClientHostIfNull() {
+        try {
+            Field hostField = NetworkClient.class.getDeclaredField("host");
+            hostField.setAccessible(true);
+            if (hostField.get(NetworkClient.getInstance()) == null) {
+                hostField.set(NetworkClient.getInstance(), "localhost");
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void crashCurrentMockServer() throws IOException {
+        running = false;
+        if (mockServerSocket != null && !mockServerSocket.isClosed()) {
+            mockServerSocket.close();
+        }
+        for (Socket s : acceptedSockets) {
+            try {
+                if (!s.isClosed()) {
+                    s.close();
+                }
+            } catch (IOException ignored) {
+            }
+        }
+        acceptedSockets.clear();
+        if (serverExecutor != null) {
+            serverExecutor.shutdownNow();
+        }
+    }
+
     private void handleClient(Socket socket) {
         try (
                 BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
                 PrintWriter writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)
         ) {
             String line;
+            int mixedCount = 0;
             while ((line = reader.readLine()) != null) {
                 Message req = GsonConfig.getGson().fromJson(line, Message.class);
 
@@ -79,6 +122,64 @@ class MockSocketServerTest {
                         Thread.sleep(2000);
                     } catch (InterruptedException ignored) {
                     }
+                }
+
+                // Giả lập Server im lặng hoàn toàn không trả lời
+                if ("STALL_FOREVER".equals(req.getAction())) {
+                    try {
+                        Thread.sleep(2500);
+                    } catch (InterruptedException ignored) {
+                    }
+                    continue;
+                }
+
+                // Giả lập Shared Action cho kiểm thử timeout độc lập giữa các luồng
+                if ("SHARED_ACTION".equals(req.getAction())) {
+                    if ("drop-req-1".equals(req.getPayload())) {
+                        continue;
+                    }
+                    try {
+                        Thread.sleep(220);
+                    } catch (InterruptedException ignored) {
+                    }
+                    writer.println(GsonConfig.getGson().toJson(Message.success("SHARED_ACTION", "reply-2")));
+                    continue;
+                }
+
+                // Giả lập Server đẩy broadcast DELETE_AUCTION trước khi trả GET_AUCTIONS
+                if (Message.ACTION_GET_AUCTIONS.equals(req.getAction())) {
+                    writer.println(GsonConfig.getGson().toJson(Message.success(Message.ACTION_DELETE_AUCTION, 99)));
+                    try {
+                        Thread.sleep(40);
+                    } catch (InterruptedException ignored) {
+                    }
+                    writer.println(GsonConfig.getGson().toJson(Message.success(Message.ACTION_GET_AUCTIONS, "[]")));
+                    continue;
+                }
+
+                // Giả lập Server gửi JSON hỏng + dòng trắng xen trước phản hồi hợp lệ
+                if ("CORRUPTED_BEFORE_PING".equals(req.getAction())) {
+                    writer.println("{corrupted_json_without_closing");
+                    writer.println("   ");
+                    writer.println(GsonConfig.getGson().toJson(Message.success("CORRUPTED_BEFORE_PING", "alive")));
+                    continue;
+                }
+
+                // Giả lập Server gửi BID_UPDATE trước khi phản hồi PING
+                if ("BID_BEFORE_PING".equals(req.getAction())) {
+                    writer.println(GsonConfig.getGson().toJson(Message.success(Message.ACTION_BID_UPDATE, "update-1")));
+                    writer.println(GsonConfig.getGson().toJson(Message.success("BID_BEFORE_PING", "ok")));
+                    continue;
+                }
+
+                // Giả lập nhiều action song song xen kẽ BID_UPDATE
+                if (req.getAction() != null && req.getAction().startsWith("MIXED_ACTION_")) {
+                    mixedCount++;
+                    if (mixedCount % 2 == 0) {
+                        writer.println(GsonConfig.getGson().toJson(Message.success(Message.ACTION_BID_UPDATE, "live-" + mixedCount)));
+                    }
+                    writer.println(GsonConfig.getGson().toJson(Message.success(req.getAction(), req.getPayload())));
+                    continue;
                 }
 
                 Message resp;
@@ -107,22 +208,15 @@ class MockSocketServerTest {
 
     @AfterEach
     void tearDown() {
-        running = false;
+        resetNetworkClientHostIfNull();
         NetworkClient.getInstance().disconnect();
 
         try {
-            if (mockServerSocket != null && !mockServerSocket.isClosed()) {
-                mockServerSocket.close();
-            }
-        } catch (IOException ignored) {
-        }
-
-        if (serverExecutor != null) {
-            serverExecutor.shutdownNow();
-            try {
+            crashCurrentMockServer();
+            if (serverExecutor != null) {
                 serverExecutor.awaitTermination(1, TimeUnit.SECONDS);
-            } catch (InterruptedException ignored) {
             }
+        } catch (IOException | InterruptedException ignored) {
         }
 
         // Khôi phục lại cấu hình mặc định (port 8888)
@@ -310,5 +404,176 @@ class MockSocketServerTest {
                 NetworkClient.mapErrorToException(Message.error(Message.ACTION_PLACE_BID, "Giá đặt phải cao hơn mức giá hiện tại")));
         assertInstanceOf(ConnectionException.class,
                 NetworkClient.mapErrorToException(Message.error(Message.ACTION_GET_AUCTIONS, "Lỗi mạng hoặc không thể kết nối tới Server")));
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("sendRequestAsync phải tự timeout nếu Server nhận kết nối rồi im lặng")
+    void testSendRequestAsyncMustTimeoutWhenServerStalls() throws Exception {
+        NetworkClient client = NetworkClient.getInstance();
+        client.setTimeoutMs(250);
+
+        CompletableFuture<Message> future = client.sendRequestAsync(Message.request("STALL_FOREVER", "ping"));
+        Message res = future.get(700, TimeUnit.MILLISECONDS);
+        assertNotNull(res);
+        assertFalse(res.isSuccess());
+        assertTrue(res.getErrorMessage().contains("timed out") || res.getErrorMessage().contains("Lỗi mạng"));
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("Broadcast DELETE_AUCTION xen ngang không được cướp nhầm Future của GET_AUCTIONS")
+    void testDeleteAuctionBroadcastMustNotHijackPendingGetAuctions() {
+        Message response = NetworkClient.getInstance().sendRequest(Message.request(Message.ACTION_GET_AUCTIONS, null));
+        assertNotNull(response);
+        assertEquals(Message.ACTION_GET_AUCTIONS, response.getAction());
+        assertTrue(response.isSuccess());
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("Một luồng timeout cùng action không được xóa mất PendingRequest của luồng khác đang chạy hợp lệ")
+    void testTimeoutOfOneCallerMustNotDropConcurrentSameActionWaiter() throws Exception {
+        NetworkClient client = NetworkClient.getInstance();
+        client.setTimeoutMs(150);
+
+        CompletableFuture<Message> caller1 = CompletableFuture.supplyAsync(
+                () -> client.sendRequest(Message.request("SHARED_ACTION", "drop-req-1"))
+        );
+        Thread.sleep(30);
+        client.setTimeoutMs(1500);
+        CompletableFuture<Message> caller2Future = client.sendRequestAsync(Message.request("SHARED_ACTION", "req-2"));
+
+        Message res1 = caller1.get(1, TimeUnit.SECONDS);
+        assertFalse(res1.isSuccess());
+
+        Message res2 = caller2Future.get(1500, TimeUnit.MILLISECONDS);
+        assertTrue(res2.isSuccess());
+        assertEquals("reply-2", res2.getPayload());
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("Cấu hình configure(null, port) không được làm sập NullPointerException ở lần configure sau")
+    void testConfigureNullHostShouldNotCrashSubsequentConfigure() {
+        NetworkClient client = NetworkClient.getInstance();
+        assertDoesNotThrow(() -> client.configure(null, 8888));
+        assertDoesNotThrow(() -> client.configure("localhost", mockPort));
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("connectOrThrow với port âm phải ném ConnectionException (hoặc DataValidationException)")
+    void testConnectOrThrowInvalidPortShouldWrapInAuctionException() {
+        NetworkClient client = NetworkClient.getInstance();
+        client.configure("localhost", -1);
+        assertThrows(ConnectionException.class, client::connectOrThrow);
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("Server gửi dòng JSON hỏng xen giữa gói tin hợp lệ không được làm chết ReaderLoop")
+    void testMalformedJsonFromServerDoesNotKillReaderLoop() {
+        Message res = NetworkClient.getInstance().sendRequest(Message.request("CORRUPTED_BEFORE_PING", null));
+        assertTrue(res.isSuccess());
+        assertEquals("alive", res.getPayload());
+    }
+
+    @Test
+    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @DisplayName("Một Observer Listener ném Exception không được làm mất sự kiện của các Listener khác")
+    void testObserverListenerExceptionIsolation() {
+        AtomicBoolean secondListenerCalled = new AtomicBoolean(false);
+        Consumer<Message> faultyListener = msg -> {
+            throw new RuntimeException("Simulated UI listener crash");
+        };
+        Consumer<Message> healthyListener = msg -> {
+            if (Message.ACTION_BID_UPDATE.equals(msg.getAction())) {
+                secondListenerCalled.set(true);
+            }
+        };
+
+        NetworkClient client = NetworkClient.getInstance();
+        client.addListener(faultyListener);
+        client.addListener(healthyListener);
+        try {
+            Message res = client.sendRequest(Message.request("BID_BEFORE_PING", null));
+            assertTrue(res.isSuccess());
+            assertTrue(secondListenerCalled.get());
+        } finally {
+            client.removeListener(faultyListener);
+            client.removeListener(healthyListener);
+        }
+    }
+
+    @Test
+    @Timeout(value = 8, unit = TimeUnit.SECONDS)
+    @DisplayName("Khả năng tự kết nối lại (Reconnect) sau khi Server sập rồi khởi động lại")
+    void testServerRestartReconnectRecovery() throws Exception {
+        int fixedPort = this.mockPort;
+        NetworkClient client = NetworkClient.getInstance();
+        client.setTimeoutMs(800);
+
+        Message r1 = client.sendRequest(Message.request("PING", null));
+        assertTrue(r1.isSuccess());
+
+        crashCurrentMockServer();
+        Thread.sleep(100);
+
+        Message r2 = client.sendRequest(Message.request("PING", null));
+        assertFalse(r2.isSuccess());
+
+        mockServerSocket = new ServerSocket(fixedPort);
+        running = true;
+        serverExecutor = Executors.newSingleThreadExecutor();
+        serverExecutor.submit(() -> {
+            try {
+                Socket s = mockServerSocket.accept();
+                acceptedSockets.add(s);
+                handleClient(s);
+            } catch (IOException ignored) {
+            }
+        });
+
+        Message r3 = client.sendRequest(Message.request("PING", null));
+        assertTrue(r3.isSuccess());
+        assertEquals("ok", r3.getPayload());
+    }
+
+    @Test
+    @Timeout(value = 8, unit = TimeUnit.SECONDS)
+    @DisplayName("Bắn đồng thời 8 luồng sendRequestAsync khác action xen kẽ Broadcast BID_UPDATE")
+    void testConcurrentMixedAsyncRequestsWithInterleavedBroadcasts() throws Exception {
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch startGate = new CountDownLatch(1);
+        List<Future<Message>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threads; i++) {
+            final String act = "MIXED_ACTION_" + i;
+            final String data = "payload_" + i;
+            futures.add(pool.submit(() -> {
+                startGate.await();
+                return NetworkClient.getInstance().sendRequestAsync(Message.request(act, data)).get(3, TimeUnit.SECONDS);
+            }));
+        }
+
+        startGate.countDown();
+        for (int i = 0; i < threads; i++) {
+            Message m = futures.get(i).get(3, TimeUnit.SECONDS);
+            assertTrue(m.isSuccess());
+            assertEquals("MIXED_ACTION_" + i, m.getAction());
+            assertEquals("payload_" + i, m.getPayload());
+        }
+        pool.shutdownNow();
+    }
+
+    @Test
+    @DisplayName("mapErrorToException phân loại chính xác 'Phiên đấu giá đã đóng' và lỗi validation ở Register")
+    void testMapErrorToExceptionMisclassification() {
+        assertInstanceOf(AuctionClosedException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_PLACE_BID, "Phiên đấu giá đã đóng!")));
+        assertInstanceOf(DataValidationException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_REGISTER, "Tên đăng nhập không hợp lệ!")));
     }
 }

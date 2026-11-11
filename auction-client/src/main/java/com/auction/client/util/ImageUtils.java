@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Base64;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Lớp tiện ích xử lý ảnh (ImageUtils) theo đúng sơ đồ UML.
@@ -22,6 +23,7 @@ public class ImageUtils {
 
     // Thư mục mặc định để lưu trữ ảnh (nếu chạy lưu local)
     private static final String DEFAULT_IMAGE_DIR = "storage/images";
+    private static final AtomicLong FILE_SEQUENCE = new AtomicLong(0);
 
     // Private constructor ngăn việc khởi tạo đối tượng vì đây là lớp tiện ích tĩnh (Utility Class)
     private ImageUtils() {
@@ -107,14 +109,14 @@ public class ImageUtils {
             Files.createDirectories(dirPath);
         }
 
-        // Tạo tên file an toàn dựa trên tên sản phẩm và dấu thời gian
+        // Tạo tên file an toàn kèm bộ đếm tuần tự duy nhất để tránh trùng tên trong cùng mili-giây
         String safeName = (itemName != null ? itemName.replaceAll("[^a-zA-Z0-9_-]", "_") : "item");
-        String fileName = safeName + "_" + System.currentTimeMillis() + ".png";
+        String fileName = safeName + "_" + System.currentTimeMillis() + "_" + FILE_SEQUENCE.incrementAndGet() + ".png";
         Path filePath = dirPath.resolve(fileName);
 
-        // Ghi dữ liệu byte vào file
+        // Ghi dữ liệu byte vào file (CREATE_NEW đảm bảo không ghi đè file đã tồn tại)
         byte[] imageBytes = base64ToBytes(base64);
-        Files.write(filePath, imageBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        Files.write(filePath, imageBytes, StandardOpenOption.CREATE_NEW);
 
         return filePath.toString();
     }
