@@ -2,6 +2,9 @@ package com.auction.server;
 
 import com.auction.service.AuctionService;
 import com.auction.exception.AuctionException;
+import com.auction.exception.AuctionNotFoundException;
+import com.auction.exception.AuthenticationException;
+import com.auction.exception.DataValidationException;
 import com.auction.dao.AuctionDAO;
 import com.auction.dao.BidTransactionDAO;
 import com.auction.dao.DBConnection;
@@ -166,8 +169,10 @@ public class ClientHandler implements Runnable {
                     return Message.success(Message.ACTION_LOGOUT, "Đăng xuất thành công.");
 
                 default:
-                    return Message.error(action, "Hành động không được hỗ trợ: " + action);
+                    throw new DataValidationException("Hành động không được hỗ trợ: " + action);
             }
+        } catch (AuctionException e) {
+            return Message.error(action, e.getMessage());
         } catch (Exception e) {
             System.err.println("[ClientHandler] Lỗi khi xử lý action " + action + ": " + e.getMessage());
             return Message.error(action, e.getMessage());
@@ -183,18 +188,18 @@ public class ClientHandler implements Runnable {
         String password = getStringField(payload, "password");
 
         if (username.isEmpty() || password.isEmpty()) {
-            return Message.error(Message.ACTION_LOGIN, "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.");
+            throw new DataValidationException("Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.");
         }
 
         IUserDAO userDAO = new UserDAO();
         User user = userDAO.findByUsername(username);
         if (user == null) {
-            return Message.error(Message.ACTION_LOGIN, "Tài khoản không tồn tại: " + username);
+            throw new AuthenticationException("Tài khoản không tồn tại: " + username);
         }
 
         String hashedInput = hashSHA256(password);
         if (!hashedInput.equalsIgnoreCase(user.getPassword()) && !password.equals(user.getPassword())) {
-            return Message.error(Message.ACTION_LOGIN, "Mật khẩu không chính xác.");
+            throw new AuthenticationException("Mật khẩu không chính xác.");
         }
 
         return Message.success(Message.ACTION_LOGIN, user);
@@ -213,12 +218,12 @@ public class ClientHandler implements Runnable {
         }
 
         if (username.isEmpty() || password.isEmpty()) {
-            return Message.error(Message.ACTION_REGISTER, "Tên đăng nhập và mật khẩu không được để trống.");
+            throw new DataValidationException("Tên đăng nhập và mật khẩu không được để trống.");
         }
 
         IUserDAO userDAO = new UserDAO();
         if (userDAO.findByUsername(username) != null) {
-            return Message.error(Message.ACTION_REGISTER, "Tên đăng nhập đã tồn tại: " + username);
+            throw new AuthenticationException("Tên đăng nhập đã tồn tại: " + username);
         }
 
         User newUser = UserFactory.createUser(null, username, password, role);
@@ -243,7 +248,7 @@ public class ClientHandler implements Runnable {
     private Message handleCreateAuction(Message request) {
         Auction auction = request.parsePayload(Auction.class);
         if (auction == null) {
-            return Message.error(Message.ACTION_CREATE_AUCTION, "Dữ liệu phiên đấu giá không hợp lệ.");
+            throw new DataValidationException("Dữ liệu phiên đấu giá không hợp lệ.");
         }
 
         IItemDAO itemDAO = new ItemDAO();
@@ -267,10 +272,13 @@ public class ClientHandler implements Runnable {
     private Message handleUpdateAuction(Message request) {
         Auction auction = request.parsePayload(Auction.class);
         if (auction == null || auction.getId() == null) {
-            return Message.error(Message.ACTION_UPDATE_AUCTION, "Phiên đấu giá cần cập nhật không hợp lệ.");
+            throw new DataValidationException("Phiên đấu giá cần cập nhật không hợp lệ.");
         }
 
         IAuctionDAO auctionDAO = new AuctionDAO();
+        if (auctionDAO.findById(auction.getId()) == null) {
+            throw new AuctionNotFoundException("Không tìm thấy phiên đấu giá #" + auction.getId());
+        }
         auctionDAO.update(auction);
 
         AuctionServer.broadcast(Message.success(Message.ACTION_AUCTION_UPDATE, auction));
@@ -291,10 +299,13 @@ public class ClientHandler implements Runnable {
             }
         }
         if (auctionId == null) {
-            return Message.error(Message.ACTION_DELETE_AUCTION, "Thiếu ID phiên đấu giá cần xóa.");
+            throw new DataValidationException("Thiếu ID phiên đấu giá cần xóa.");
         }
 
         IAuctionDAO auctionDAO = new AuctionDAO();
+        if (auctionDAO.findById(auctionId) == null) {
+            throw new AuctionNotFoundException("Không tìm thấy phiên đấu giá #" + auctionId);
+        }
         auctionDAO.delete(auctionId);
 
         AuctionServer.broadcast(Message.success(Message.ACTION_DELETE_AUCTION, auctionId));

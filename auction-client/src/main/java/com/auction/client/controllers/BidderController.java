@@ -4,8 +4,13 @@ import com.auction.client.network.Message;
 import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
 import com.auction.client.util.ImageUtils;
+import com.auction.client.util.ValidationUtils;
+import com.auction.exception.AuctionClosedException;
+import com.auction.exception.AuctionException;
+import com.auction.exception.InvalidBidException;
 import com.auction.model.Auction;
 import com.auction.model.Item;
+import com.auction.model.Status;
 import com.auction.model.User;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -332,31 +337,29 @@ public class BidderController extends BaseController {
         }
 
         try {
-            double bidValue = Double.parseDouble(rawInput);
-            double minValidBid = currentPrice + minIncrement;
-
-            // KIỂM TRA BƯỚC GIÁ TỐI THIỂU (CHỐNG TROLL GIÁ BATMAN)
-            if (bidValue < minValidBid) {
-                showAlert("Giá không hợp lệ", String.format(
-                        "Mức giá bạn đặt (%s VNĐ) chưa đạt bước giá tối thiểu!\n\n" +
-                                "• Giá cao nhất hiện tại: %s VNĐ\n" +
-                                "• Bước giá tối thiểu (Seller): %s VNĐ\n" +
-                                "➤ Mức giá hợp lệ bạn phải đặt từ: %s VNĐ trở lên!",
-                        currencyFormatter.format(bidValue),
-                        currencyFormatter.format(currentPrice),
-                        currencyFormatter.format(minIncrement),
-                        currencyFormatter.format(minValidBid)
-                ));
-                return;
-            }
-
-            if (btnPlaceBid != null) {
-                btnPlaceBid.setDisable(true);
+            if (remainingSeconds <= 0 || (currentAuction != null
+                    && (currentAuction.getStatus() == Status.FINISHED || currentAuction.getStatus() == Status.CANCELED))) {
+                throw new AuctionClosedException("Phiên đấu giá này đã kết thúc hoặc bị hủy, không thể đặt giá thêm!");
             }
 
             User currentUser = SessionManager.getInstance().getCurrentUser();
             int bidderId = (currentUser != null && currentUser.getId() != null) ? currentUser.getId() : 3;
             int auctionId = (currentAuction != null && currentAuction.getId() != null) ? currentAuction.getId() : 1;
+
+            if (currentAuction != null && currentAuction.getSeller() != null
+                    && currentAuction.getSeller().getId() != null
+                    && currentAuction.getSeller().getId().equals(bidderId)) {
+                throw new InvalidBidException("Người bán không thể tự đặt giá cho sản phẩm của chính mình!");
+            }
+
+            double bidValue = Double.parseDouble(rawInput);
+
+            // Kiểm tra bước giá tối thiểu (ném InvalidBidException nếu vi phạm)
+            ValidationUtils.validateBidAmount(bidValue, currentPrice, minIncrement);
+
+            if (btnPlaceBid != null) {
+                btnPlaceBid.setDisable(true);
+            }
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("auctionId", auctionId);
@@ -393,10 +396,8 @@ public class BidderController extends BaseController {
                                     showAlert("Thành công", "Bạn đã đặt giá thành công: " + currencyFormatter.format(bidValue) + " VNĐ!");
                                 }
                             } else {
-                                String errMsg = (response != null && response.getErrorMessage() != null)
-                                        ? response.getErrorMessage()
-                                        : "Không thể kết nối tới máy chủ (localhost:8888).";
-                                showAlert("Đặt giá thất bại", errMsg);
+                                AuctionException errEx = NetworkClient.mapErrorToException(response);
+                                showAlert(resolveExceptionTitle(errEx), errEx.getMessage());
                             }
                         });
                     })
@@ -412,6 +413,8 @@ public class BidderController extends BaseController {
 
         } catch (NumberFormatException e) {
             showAlert("Lỗi", "Số tiền nhập vào không hợp lệ!");
+        } catch (AuctionException e) {
+            showAlert(resolveExceptionTitle(e), e.getMessage());
         }
     }
 

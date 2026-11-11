@@ -1,6 +1,12 @@
 package com.auction.client.network;
 
 import com.auction.client.util.GsonConfig;
+import com.auction.exception.AuctionClosedException;
+import com.auction.exception.AuctionNotFoundException;
+import com.auction.exception.AuthenticationException;
+import com.auction.exception.ConnectionException;
+import com.auction.exception.DataValidationException;
+import com.auction.exception.InvalidBidException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -273,5 +279,36 @@ class MockSocketServerTest {
         assertNotNull(response);
         assertTrue(response.isSuccess());
         assertEquals("PONG", response.getAction());
+    }
+
+    @Test
+    @DisplayName("connectOrThrow và sendRequestOrThrow ném ConnectionException khi mất kết nối Server")
+    void testConnectionExceptionOnUnreachableServer() {
+        NetworkClient client = NetworkClient.getInstance();
+        client.configure("localhost", 59124);
+        client.setTimeoutMs(500);
+
+        assertThrows(ConnectionException.class, client::connectOrThrow);
+        assertThrows(ConnectionException.class,
+                () -> client.sendRequestOrThrow(Message.request(Message.ACTION_LOGIN, "dummy")));
+    }
+
+    @Test
+    @DisplayName("sendRequestOrThrow và mapErrorToException phân loại đúng Custom Exceptions của hệ thống")
+    void testSendRequestOrThrowAndExceptionMapping() {
+        NetworkClient client = NetworkClient.getInstance();
+
+        assertThrows(DataValidationException.class, () -> client.sendRequestOrThrow(null));
+
+        assertInstanceOf(AuthenticationException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_LOGIN, "Mật khẩu không chính xác.")));
+        assertInstanceOf(AuctionClosedException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_PLACE_BID, "Phiên đấu giá hiện không mở để nhận giá (FINISHED)")));
+        assertInstanceOf(AuctionNotFoundException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_PLACE_BID, "Không tìm thấy phiên đấu giá #99")));
+        assertInstanceOf(InvalidBidException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_PLACE_BID, "Giá đặt phải cao hơn mức giá hiện tại")));
+        assertInstanceOf(ConnectionException.class,
+                NetworkClient.mapErrorToException(Message.error(Message.ACTION_GET_AUCTIONS, "Lỗi mạng hoặc không thể kết nối tới Server")));
     }
 }

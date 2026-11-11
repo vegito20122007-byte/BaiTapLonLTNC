@@ -1,5 +1,8 @@
 package com.auction.client.util;
 
+import com.auction.exception.DataValidationException;
+import com.auction.exception.InvalidBidException;
+
 import java.util.regex.Pattern;
 
 /**
@@ -86,5 +89,83 @@ public final class ValidationUtils {
      */
     public static boolean isValidAuctionDuration(int durationMinutes) {
         return durationMinutes >= MIN_DURATION_MINUTES && durationMinutes <= MAX_DURATION_MINUTES;
+    }
+
+    /**
+     * Kiểm tra dữ liệu đăng nhập hợp lệ, ném {@link DataValidationException} nếu sai quy tắc.
+     */
+    public static void validateLoginInput(String username, String password) {
+        String u = username != null ? username.trim() : "";
+        String p = password != null ? password.trim() : "";
+        if (u.isEmpty() || p.isEmpty()) {
+            throw new DataValidationException("Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!");
+        }
+        validateUsernameFormat(u);
+    }
+
+    /**
+     * Kiểm tra dữ liệu đăng ký tài khoản hợp lệ, ném {@link DataValidationException} nếu sai quy tắc.
+     */
+    public static void validateRegistrationInput(String username, String password, String confirmPassword, String role) {
+        String u = username != null ? username.trim() : "";
+        String p = password != null ? password.trim() : "";
+        String cp = confirmPassword != null ? confirmPassword.trim() : "";
+        if (u.isEmpty() || p.isEmpty() || cp.isEmpty()) {
+            throw new DataValidationException("Vui lòng nhập đầy đủ tất cả các trường thông tin!");
+        }
+        validateUsernameFormat(u);
+        if (!isValidRole(role)) {
+            throw new DataValidationException("Vui lòng chủ động chọn vai trò tài khoản (Bidder hoặc Seller)!");
+        }
+        if (!isValidPassword(p)) {
+            throw new DataValidationException("Mật khẩu phải chứa ít nhất " + MIN_PASSWORD_LENGTH + " ký tự!");
+        }
+        if (!p.equals(cp)) {
+            throw new DataValidationException("Mật khẩu xác nhận không khớp!");
+        }
+    }
+
+    /**
+     * Kiểm tra dữ liệu tạo phiên đấu giá hợp lệ, ném {@link DataValidationException} nếu sai quy tắc.
+     */
+    public static void validateAuctionCreation(String name, double startPrice, double reservePrice, int durationMinutes) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new DataValidationException("Tên phiên đấu giá không được để trống!");
+        }
+        if (startPrice <= 0) {
+            throw new DataValidationException("Giá khởi điểm phải lớn hơn 0!");
+        }
+        if (!isValidReservePrice(startPrice, reservePrice)) {
+            throw new DataValidationException("Giá bảo lưu không được nhỏ hơn giá khởi điểm ("
+                    + String.format("%,.0f VNĐ", startPrice) + ")!");
+        }
+        if (!isValidAuctionDuration(durationMinutes)) {
+            throw new DataValidationException("Thời lượng phiên đấu giá phải từ "
+                    + MIN_DURATION_MINUTES + " phút đến tối đa 30 ngày (" + MAX_DURATION_MINUTES + " phút)!");
+        }
+    }
+
+    /**
+     * Kiểm tra giá đặt hợp lệ theo bước giá tối thiểu, ném {@link InvalidBidException} nếu vi phạm.
+     */
+    public static void validateBidAmount(double bidValue, double currentPrice, double minIncrement) {
+        if (bidValue <= 0) {
+            throw new InvalidBidException("Số tiền đặt giá phải lớn hơn 0!");
+        }
+        double minValidBid = currentPrice + minIncrement;
+        if (bidValue < minValidBid) {
+            throw new InvalidBidException(String.format(
+                    "Mức giá bạn đặt (%,.0f VNĐ) chưa đạt bước giá tối thiểu! Mức giá hợp lệ phải từ %,.0f VNĐ trở lên.",
+                    bidValue, minValidBid));
+        }
+    }
+
+    private static void validateUsernameFormat(String trimmedUsername) {
+        if (trimmedUsername.length() < MIN_USERNAME_LENGTH) {
+            throw new DataValidationException("Tên đăng nhập phải chứa ít nhất " + MIN_USERNAME_LENGTH + " ký tự!");
+        }
+        if (!isValidUsername(trimmedUsername)) {
+            throw new DataValidationException("Tên đăng nhập không được chứa khoảng trắng hoặc ký tự đặc biệt!");
+        }
     }
 }

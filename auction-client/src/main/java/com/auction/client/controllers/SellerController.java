@@ -5,6 +5,8 @@ import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
 import com.auction.client.util.ImageUtils;
 import com.auction.client.util.ValidationUtils;
+import com.auction.exception.AuctionException;
+import com.auction.exception.UnauthorizedActionException;
 import com.auction.model.*;
 import com.google.gson.reflect.TypeToken;
 import javafx.application.Platform;
@@ -291,45 +293,30 @@ public class SellerController extends BaseController {
 
         try {
             double startPrice = Double.parseDouble(startPriceStr);
-            if (startPrice <= 0) {
-                showError(lblMessage, "Giá khởi điểm phải lớn hơn 0!");
-                return;
-            }
-
-            // 2. Kiểm tra giá bảo lưu: nếu để trống thì mặc định bằng giá khởi điểm; nếu có nhập thì phải >= giá khởi điểm
             double reservePrice = reservePriceStr.isEmpty() ? startPrice : Double.parseDouble(reservePriceStr);
-            if (!ValidationUtils.isValidReservePrice(startPrice, reservePrice)) {
-                showError(lblMessage, "Giá bảo lưu không được nhỏ hơn giá khởi điểm (" + String.format("%,.0f VNĐ", startPrice) + ")!");
-                return;
-            }
-
-            // 3. Kiểm tra giới hạn thời lượng phiên: tối thiểu 5 phút, tối đa 30 ngày (43.200 phút)
             int durationMinutes = Integer.parseInt(durationStr);
-            if (!ValidationUtils.isValidAuctionDuration(durationMinutes)) {
-                showError(lblMessage, "Thời lượng phiên đấu giá phải từ 5 phút đến tối đa 30 ngày (43.200 phút)!");
-                return;
-            }
 
-            // 4. Lấy thông tin Seller từ Session
+            // 2. Kiểm tra dữ liệu tạo phiên đấu giá (ném DataValidationException nếu không hợp lệ)
+            ValidationUtils.validateAuctionCreation(name, startPrice, reservePrice, durationMinutes);
+
+            // 3. Kiểm tra phân quyền Seller từ Session (ném UnauthorizedActionException nếu không phải SELLER)
             User currentUser = SessionManager.getInstance().getCurrentUser();
-            Seller seller = (currentUser instanceof Seller) ? (Seller) currentUser : null;
-            if (seller == null) {
-                showError(lblMessage, "Vui lòng đăng nhập với tài khoản Người bán (SELLER) để thực hiện thao tác này!");
-                return;
+            if (!(currentUser instanceof Seller seller)) {
+                throw new UnauthorizedActionException("Vui lòng đăng nhập với tài khoản Người bán (SELLER) để thực hiện thao tác này!");
             }
 
-            // 5. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP (để MySQL tự sinh ID, Ảnh là Optional)
+            // 4. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP (để MySQL tự sinh ID, Ảnh là Optional)
             Item item = ItemFactory.createItem(category, null, name, description, seller);
             if (this.encodedImage != null) {
                 item.setImageData(this.encodedImage);
             }
 
-            // 6. Tạo đối tượng Auction mới (ID để null cho CSDL tự sinh AUTO_INCREMENT)
+            // 5. Tạo đối tượng Auction mới (ID để null cho CSDL tự sinh AUTO_INCREMENT)
             LocalDateTime startTime = LocalDateTime.now();
             LocalDateTime endTime = startTime.plusMinutes(durationMinutes);
             Auction newAuction = new Auction(null, name, item, seller, startPrice, reservePrice, startTime, endTime);
 
-            // 7. Gửi lên AuctionServer qua TCP Socket
+            // 6. Gửi lên AuctionServer qua TCP Socket
             NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_CREATE_AUCTION, newAuction))
                     .thenAccept(response -> {
                         Platform.runLater(() -> {
@@ -341,10 +328,8 @@ public class SellerController extends BaseController {
                                 showSuccess(lblMessage, "Tạo phiên đấu giá thành công trên Server: #" + toAdd.getId());
                                 handleClearForm(event);
                             } else {
-                                String err = (response != null && response.getErrorMessage() != null)
-                                        ? response.getErrorMessage()
-                                        : "Không thể kết nối tới máy chủ (localhost:8888).";
-                                showError(lblMessage, "Lỗi tạo phiên: " + err);
+                                AuctionException errEx = NetworkClient.mapErrorToException(response);
+                                showError(lblMessage, "[" + resolveExceptionTitle(errEx) + "] " + errEx.getMessage());
                             }
                         });
                     })
@@ -355,6 +340,8 @@ public class SellerController extends BaseController {
 
         } catch (NumberFormatException e) {
             showError(lblMessage, "Giá tiền và thời lượng phải là số hợp lệ!");
+        } catch (AuctionException e) {
+            showError(lblMessage, "[" + resolveExceptionTitle(e) + "] " + e.getMessage());
         } catch (Exception e) {
             showError(lblMessage, "Lỗi khi tạo phiên: " + e.getMessage());
         }

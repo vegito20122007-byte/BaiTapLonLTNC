@@ -1,6 +1,15 @@
 package com.auction.client.controllers;
 
 import com.auction.client.util.GsonConfig;
+import com.auction.exception.AuctionClosedException;
+import com.auction.exception.AuctionException;
+import com.auction.exception.AuctionNotFoundException;
+import com.auction.exception.AuthenticationException;
+import com.auction.exception.ConnectionException;
+import com.auction.exception.DataValidationException;
+import com.auction.exception.InsufficientBalanceException;
+import com.auction.exception.InvalidBidException;
+import com.auction.exception.UnauthorizedActionException;
 import com.google.gson.Gson;
 import javafx.event.Event;
 import javafx.fxml.FXMLLoader;
@@ -85,5 +94,36 @@ public abstract class BaseController {
         if (lbl != null) {
             lbl.setText("");
         }
+    }
+
+    /**
+     * Trả về tiêu đề thông báo thân thiện tương ứng với từng loại {@link AuctionException}.
+     */
+    protected String resolveExceptionTitle(AuctionException ex) {
+        if (ex instanceof ConnectionException) {
+            return "Lỗi kết nối máy chủ";
+        }
+        if (ex instanceof AuthenticationException) {
+            return "Lỗi xác thực tài khoản";
+        }
+        if (ex instanceof UnauthorizedActionException) {
+            return "Không có quyền thao tác";
+        }
+        if (ex instanceof AuctionClosedException) {
+            return "Phiên đấu giá đã đóng";
+        }
+        if (ex instanceof AuctionNotFoundException) {
+            return "Không tìm thấy phiên đấu giá";
+        }
+        if (ex instanceof InvalidBidException) {
+            return "Giá đặt không hợp lệ";
+        }
+        if (ex instanceof InsufficientBalanceException) {
+            return "Số dư không đủ";
+        }
+        if (ex instanceof DataValidationException) {
+            return "Dữ liệu không hợp lệ";
+        }
+        return "Lỗi hệ thống đấu giá";
     }
 }

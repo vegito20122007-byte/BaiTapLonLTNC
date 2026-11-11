@@ -1,6 +1,15 @@
 package com.auction.client.network;
 
 import com.auction.client.util.GsonConfig;
+import com.auction.exception.AuctionClosedException;
+import com.auction.exception.AuctionException;
+import com.auction.exception.AuctionNotFoundException;
+import com.auction.exception.AuthenticationException;
+import com.auction.exception.ConnectionException;
+import com.auction.exception.DataValidationException;
+import com.auction.exception.InsufficientBalanceException;
+import com.auction.exception.InvalidBidException;
+import com.auction.exception.UnauthorizedActionException;
 import com.google.gson.Gson;
 
 import java.io.BufferedReader;
@@ -148,6 +157,20 @@ public class NetworkClient {
         readerThread.start();
 
         System.out.println("[NetworkClient] Đã kết nối thành công tới Server: " + host + ":" + port);
+    }
+
+    /**
+     * Mở kết nối tới Server và ném {@link ConnectionException} nếu không thể kết nối.
+     *
+     * @throws ConnectionException khi mất kết nối hoặc Server không khả dụng
+     */
+    public synchronized void connectOrThrow() {
+        try {
+            connect();
+        } catch (IOException e) {
+            throw new ConnectionException(
+                    "Không thể kết nối tới máy chủ (" + host + ":" + port + "): " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -341,6 +364,79 @@ public class NetworkClient {
             Thread.currentThread().interrupt();
             return createErrorResponse(request.getAction(), "Yêu cầu bị gián đoạn: " + e.getMessage());
         }
+    }
+
+    /**
+     * Gửi yêu cầu tới Server và ném ngoại lệ {@link AuctionException} tương ứng nếu thất bại.
+     * Hữu ích cho các luồng cần xử lý lỗi theo kiểu phân cấp Custom Exception.
+     *
+     * @param request gói tin Message gửi đi
+     * @return gói tin phản hồi thành công (status == SUCCESS)
+     * @throws AuctionException nếu lỗi validate, mất kết nối hoặc Server trả về lỗi nghiệp vụ
+     */
+    public Message sendRequestOrThrow(Message request) {
+        if (request == null) {
+            throw new DataValidationException("Request không được để null!");
+        }
+        Message response = sendRequest(request);
+        if (response == null) {
+            throw new ConnectionException("Không nhận được phản hồi từ máy chủ (" + host + ":" + port + ").");
+        }
+        if (!response.isSuccess()) {
+            throw mapErrorToException(response);
+        }
+        return response;
+    }
+
+    /**
+     * Ánh xạ một gói tin lỗi {@link Message} nhận từ Server hoặc tầng mạng
+     * thành lớp ngoại lệ nghiệp vụ {@link AuctionException} tương ứng.
+     *
+     * @param response gói tin phản hồi trạng thái ERROR
+     * @return đối tượng AuctionException phù hợp
+     */
+    public static AuctionException mapErrorToException(Message response) {
+        if (response == null) {
+            return new ConnectionException("Không thể kết nối tới máy chủ (localhost:8888).");
+        }
+        String err = response.getErrorMessage() != null ? response.getErrorMessage() : "Lỗi không xác định từ máy chủ.";
+        String lowerErr = err.toLowerCase();
+        String action = response.getAction() != null ? response.getAction().trim().toUpperCase() : "";
+
+        if (lowerErr.contains("lỗi mạng") || lowerErr.contains("không thể kết nối")
+                || lowerErr.contains("đóng kết nối") || lowerErr.contains("timed out")
+                || lowerErr.contains("gián đoạn")) {
+            return new ConnectionException(err);
+        }
+        if (Message.ACTION_LOGIN.equals(action) || Message.ACTION_REGISTER.equals(action)) {
+            if (lowerErr.contains("để trống") || lowerErr.contains("nhập đầy đủ")) {
+                return new DataValidationException(err);
+            }
+            return new AuthenticationException(err);
+        }
+        if (lowerErr.contains("không tìm thấy phiên")) {
+            return new AuctionNotFoundException(err);
+        }
+        if (lowerErr.contains("không mở để nhận giá") || lowerErr.contains("đã kết thúc")
+                || lowerErr.contains("finished") || lowerErr.contains("canceled")) {
+            return new AuctionClosedException(err);
+        }
+        if (lowerErr.contains("số dư")) {
+            return new InsufficientBalanceException(err);
+        }
+        if (lowerErr.contains("không có quyền") || lowerErr.contains("vai trò")) {
+            return new UnauthorizedActionException(err);
+        }
+        if (Message.ACTION_PLACE_BID.equals(action)) {
+            if (lowerErr.contains("không hợp lệ") && lowerErr.contains("auctionid")) {
+                return new DataValidationException(err);
+            }
+            return new InvalidBidException(err);
+        }
+        if (lowerErr.contains("không hợp lệ") || lowerErr.contains("không được trống")) {
+            return new DataValidationException(err);
+        }
+        return new AuctionException(err);
     }
 
     /**

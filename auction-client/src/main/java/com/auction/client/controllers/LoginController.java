@@ -4,6 +4,8 @@ import com.auction.client.network.Message;
 import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
 import com.auction.client.util.ValidationUtils;
+import com.auction.exception.AuctionException;
+import com.auction.exception.DataValidationException;
 import com.auction.model.Admin;
 import com.auction.model.Bidder;
 import com.auction.model.Seller;
@@ -73,21 +75,11 @@ public class LoginController extends BaseController {
         String username = txtUsername.getText().trim();
         String password = txtPassword.getText().trim();
 
-        // 1. Kiểm tra validation không để trống
-        if (username.isEmpty() || password.isEmpty()) {
-            showError(lblError, "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!");
-            return;
-        }
-
-        // 2. Kiểm tra độ dài tối thiểu của username (ít nhất 3 ký tự)
-        if (username.length() < ValidationUtils.MIN_USERNAME_LENGTH) {
-            showError(lblError, "Tên đăng nhập phải chứa ít nhất " + ValidationUtils.MIN_USERNAME_LENGTH + " ký tự!");
-            return;
-        }
-
-        // 3. Kiểm tra ký tự không hợp lệ (không chứa khoảng trắng hoặc ký tự đặc biệt)
-        if (!ValidationUtils.isValidUsername(username)) {
-            showError(lblError, "Tên đăng nhập không được chứa khoảng trắng hoặc ký tự đặc biệt!");
+        // 1. Kiểm tra đầu vào bằng ValidationUtils (ném DataValidationException nếu không hợp lệ)
+        try {
+            ValidationUtils.validateLoginInput(username, password);
+        } catch (DataValidationException e) {
+            showError(lblError, e.getMessage());
             return;
         }
 
@@ -146,11 +138,9 @@ public class LoginController extends BaseController {
             }
         }
 
-        // Báo lỗi rõ ràng từ máy chủ hoặc cảnh báo mất kết nối mạng
-        String errMsg = (response != null && response.getErrorMessage() != null)
-                ? response.getErrorMessage()
-                : "Không thể kết nối tới máy chủ (localhost:8888). Vui lòng khởi động AuctionServer!";
-        showError(lblError, errMsg);
+        // Chuyển đổi phản hồi lỗi sang AuthenticationException / ConnectionException tương ứng
+        AuctionException ex = NetworkClient.mapErrorToException(response);
+        showError(lblError, "[" + resolveExceptionTitle(ex) + "] " + ex.getMessage());
     }
 
     /**

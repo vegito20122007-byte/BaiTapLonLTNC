@@ -1,5 +1,7 @@
 package com.auction.client.util;
 
+import com.auction.exception.DataValidationException;
+import com.auction.exception.InvalidBidException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -136,5 +138,50 @@ class ValidationUtilsTest {
         assertTrue(ValidationUtils.isValidAuctionDuration(60), "1 giờ");
         assertTrue(ValidationUtils.isValidAuctionDuration(1440), "1 ngày");
         assertTrue(ValidationUtils.isValidAuctionDuration(43200), "Biên trên: 30 ngày");
+    }
+
+    // ==========================================
+    // 5. KIỂM THỬ TÍCH HỢP CUSTOM EXCEPTIONS (Tuần 8)
+    // ==========================================
+
+    @Test
+    @DisplayName("validateLoginInput ném DataValidationException khi thông tin đăng nhập không hợp lệ")
+    void testValidateLoginInputThrowsDataValidationException() {
+        assertThrows(DataValidationException.class, () -> ValidationUtils.validateLoginInput("", "123456"));
+        assertThrows(DataValidationException.class, () -> ValidationUtils.validateLoginInput("ab", "123456"));
+        assertThrows(DataValidationException.class, () -> ValidationUtils.validateLoginInput("user 1", "123456"));
+        assertDoesNotThrow(() -> ValidationUtils.validateLoginInput("seller_01", "123456"));
+    }
+
+    @Test
+    @DisplayName("validateRegistrationInput ném DataValidationException khi dữ liệu đăng ký sai")
+    void testValidateRegistrationInputThrowsDataValidationException() {
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateRegistrationInput("user1", "123456", "123456", "-- Chọn vai trò --"));
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateRegistrationInput("user1", "12345", "12345", "BIDDER"));
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateRegistrationInput("user1", "123456", "654321", "BIDDER"));
+        assertDoesNotThrow(() -> ValidationUtils.validateRegistrationInput("user_01", "123456", "123456", "SELLER"));
+    }
+
+    @Test
+    @DisplayName("validateAuctionCreation ném DataValidationException khi tạo phiên đấu giá sai")
+    void testValidateAuctionCreationThrowsDataValidationException() {
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateAuctionCreation("", 1000000, 1000000, 30));
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateAuctionCreation("Bình cổ", 1000000, 500000, 30));
+        assertThrows(DataValidationException.class,
+                () -> ValidationUtils.validateAuctionCreation("Bình cổ", 1000000, 1000000, 2));
+        assertDoesNotThrow(() -> ValidationUtils.validateAuctionCreation("Bình cổ", 1000000, 1200000, 60));
+    }
+
+    @Test
+    @DisplayName("validateBidAmount ném InvalidBidException khi giá đặt nhỏ hơn mức tối thiểu")
+    void testValidateBidAmountThrowsInvalidBidException() {
+        assertThrows(InvalidBidException.class, () -> ValidationUtils.validateBidAmount(0, 5000000, 100000));
+        assertThrows(InvalidBidException.class, () -> ValidationUtils.validateBidAmount(5050000, 5000000, 100000));
+        assertDoesNotThrow(() -> ValidationUtils.validateBidAmount(5100000, 5000000, 100000));
     }
 }
