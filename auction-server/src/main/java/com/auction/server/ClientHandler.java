@@ -249,8 +249,11 @@ public class ClientHandler implements Runnable {
         IItemDAO itemDAO = new ItemDAO();
         IAuctionDAO auctionDAO = new AuctionDAO();
 
-        if (auction.getItem() != null && auction.getItem().getId() == null) {
-            itemDAO.save(auction.getItem());
+        if (auction.getItem() != null) {
+            Integer itemId = auction.getItem().getId();
+            if (itemId == null || itemId <= 0 || itemDAO.findById(itemId) == null) {
+                itemDAO.save(auction.getItem());
+            }
         }
         auctionDAO.save(auction);
 

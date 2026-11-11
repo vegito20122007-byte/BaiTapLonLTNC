@@ -28,7 +28,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -114,9 +113,6 @@ public class SellerController extends BaseController {
 
     // Chuỗi mã hóa ảnh Base64
     private String encodedImage;
-
-    // Bộ sinh ID tạm thời phục vụ kiểm thử dữ liệu cục bộ khi Offline
-    private static final AtomicInteger AUTO_ID_GEN = new AtomicInteger(100);
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
@@ -322,17 +318,16 @@ public class SellerController extends BaseController {
                 return;
             }
 
-            // 5. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP (Ảnh là Optional)
-            int tempId = AUTO_ID_GEN.incrementAndGet();
-            Item item = ItemFactory.createItem(category, tempId, name, description, seller);
+            // 5. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP (để MySQL tự sinh ID, Ảnh là Optional)
+            Item item = ItemFactory.createItem(category, null, name, description, seller);
             if (this.encodedImage != null) {
                 item.setImageData(this.encodedImage);
             }
 
-            // 6. Tạo đối tượng Auction mới
+            // 6. Tạo đối tượng Auction mới (ID để null cho CSDL tự sinh AUTO_INCREMENT)
             LocalDateTime startTime = LocalDateTime.now();
             LocalDateTime endTime = startTime.plusMinutes(durationMinutes);
-            Auction newAuction = new Auction(tempId, name, item, seller, startPrice, reservePrice, startTime, endTime);
+            Auction newAuction = new Auction(null, name, item, seller, startPrice, reservePrice, startTime, endTime);
 
             // 7. Gửi lên AuctionServer qua TCP Socket
             NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_CREATE_AUCTION, newAuction))
