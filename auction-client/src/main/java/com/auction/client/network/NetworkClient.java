@@ -11,10 +11,22 @@ import java.io.PrintWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Lớp điều khiển kết nối mạng Socket TCP giữa Client và AuctionServer.
- * Áp dụng thiết kế Singleton Pattern (duy nhất 1 kết nối Socket trong toàn ứng dụng).
+ * Áp dụng thiết kế Singleton Pattern (duy nhất 1 kết nối Socket trong toàn ứng dụng)
+ * kết hợp mẫu Observer Pattern:
+ * - Duy trì một luồng ngầm liên tục đọc dữ liệu đẩy về từ máy chủ (Server Push/Broadcast).
+ * - Hỗ trợ gửi/nhận yêu cầu tuần tự và bất đồng bộ (Async Non-blocking UI) không gây treo JavaFX.
+ * - Cho phép các Controller đăng ký Listener để tự động cập nhật dữ liệu Realtime
+ *   (giá mới, lượt đặt giá mới, phiên đấu giá mới...).
  */
 public class NetworkClient {
 
@@ -29,7 +41,27 @@ public class NetworkClient {
     private Socket socket;
     private BufferedReader in;
     private PrintWriter out;
+    private final Object outLock = new Object();
     private final Gson gson = GsonConfig.getGson();
+
+    private volatile boolean running = false;
+    private Thread readerThread;
+
+    // Danh sách lưu các yêu cầu đang đợi phản hồi từ Server
+    private static class PendingRequest {
+        final String action;
+        final CompletableFuture<Message> future;
+
+        PendingRequest(String action, CompletableFuture<Message> future) {
+            this.action = action;
+            this.future = future;
+        }
+    }
+
+    private final List<PendingRequest> pendingRequests = new CopyOnWriteArrayList<>();
+
+    // Danh sách đăng ký Observer lắng nghe sự kiện Realtime từ Server
+    private final List<Consumer<Message>> listeners = new CopyOnWriteArrayList<>();
 
     /**
      * Hàm dựng private đảm bảo tính chất Singleton.
@@ -47,6 +79,28 @@ public class NetworkClient {
             instance = new NetworkClient();
         }
         return instance;
+    }
+
+    /**
+     * Đăng ký một Listener nhận các thông điệp realtime (Observer Pattern).
+     *
+     * @param listener hàm callback xử lý Message
+     */
+    public void addListener(Consumer<Message> listener) {
+        if (listener != null && !listeners.contains(listener)) {
+            listeners.add(listener);
+        }
+    }
+
+    /**
+     * Hủy đăng ký Listener khi Controller đóng hoặc chuyển màn hình.
+     *
+     * @param listener hàm callback đã đăng ký
+     */
+    public void removeListener(Consumer<Message> listener) {
+        if (listener != null) {
+            listeners.remove(listener);
+        }
     }
 
     /**
@@ -70,16 +124,10 @@ public class NetworkClient {
      */
     public synchronized void setTimeoutMs(int timeoutMs) {
         this.timeoutMs = timeoutMs;
-        if (socket != null && !socket.isClosed()) {
-            try {
-                socket.setSoTimeout(timeoutMs);
-            } catch (IOException ignored) {
-            }
-        }
     }
 
     /**
-     * Mở kết nối Socket tới Server nếu chưa kết nối.
+     * Mở kết nối Socket tới Server nếu chưa kết nối và khởi động luồng đọc nền.
      *
      * @throws IOException khi không thể kết nối tới Server
      */
@@ -90,10 +138,14 @@ public class NetworkClient {
 
         socket = new Socket();
         socket.connect(new InetSocketAddress(host, port), timeoutMs);
-        socket.setSoTimeout(timeoutMs);
 
         in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
         out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+        running = true;
+
+        readerThread = new Thread(this::runReaderLoop, "NetworkClient-ReaderLoop");
+        readerThread.setDaemon(true);
+        readerThread.start();
 
         System.out.println("[NetworkClient] Đã kết nối thành công tới Server: " + host + ":" + port);
     }
@@ -104,13 +156,14 @@ public class NetworkClient {
      * @return true nếu socket đang mở và kết nối
      */
     public synchronized boolean isConnected() {
-        return socket != null && !socket.isClosed() && socket.isConnected();
+        return socket != null && !socket.isClosed() && socket.isConnected() && running;
     }
 
     /**
      * Đóng an toàn kết nối Socket và các luồng đọc/ghi.
      */
     public synchronized void disconnect() {
+        running = false;
         try {
             if (out != null) {
                 out.close();
@@ -127,52 +180,166 @@ public class NetworkClient {
             socket = null;
             in = null;
             out = null;
+
+            // Hoàn tất các yêu cầu còn chờ phản hồi bằng thông báo ngắt kết nối
+            for (PendingRequest pending : pendingRequests) {
+                pending.future.complete(createErrorResponse(pending.action, "Máy chủ đã đóng kết nối đột ngột."));
+            }
+            pendingRequests.clear();
+
             System.out.println("[NetworkClient] Đã ngắt kết nối Socket.");
         }
     }
 
+    private boolean isBroadcastAction(String action) {
+        if (action == null) return false;
+        String a = action.trim().toUpperCase();
+        return Message.ACTION_BID_UPDATE.equals(a)
+                || Message.ACTION_AUCTION_UPDATE.equals(a)
+                || Message.ACTION_CHAT.equals(a);
+    }
+
+    /**
+     * Luồng đọc nền liên tục (Background Reader Loop) đón nhận dữ liệu từ Server:
+     * - Khớp các gói tin phản hồi với yêu cầu đang đợi.
+     * - Phát (Broadcast/Dispatch) các gói tin realtime tới toàn bộ Observer đã đăng ký.
+     */
+    private void runReaderLoop() {
+        try {
+            String line;
+            while (running && in != null && (line = in.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+
+                System.out.println("[NetworkClient] Nhận: " + line);
+                Message msg;
+                try {
+                    msg = gson.fromJson(line, Message.class);
+                } catch (Exception e) {
+                    System.err.println("[NetworkClient] Lỗi giải mã gói tin JSON: " + e.getMessage());
+                    continue;
+                }
+
+                if (msg == null) {
+                    continue;
+                }
+
+                // 1. Tìm yêu cầu đang đợi khớp chính xác mã action
+                PendingRequest matched = null;
+                for (PendingRequest p : pendingRequests) {
+                    if (p.action != null && p.action.equalsIgnoreCase(msg.getAction())) {
+                        matched = p;
+                        break;
+                    }
+                }
+
+                // 2. Nếu không khớp trực tiếp và không phải gói tin broadcast, khớp theo hàng đợi FIFO (ví dụ: PING/PONG hoặc Error)
+                if (matched != null) {
+                    pendingRequests.remove(matched);
+                    matched.future.complete(msg);
+                } else if (!isBroadcastAction(msg.getAction()) && !pendingRequests.isEmpty()) {
+                    PendingRequest head = pendingRequests.remove(0);
+                    head.future.complete(msg);
+                }
+
+                // 3. Luôn phát thông điệp tới các Observer đang theo dõi (Ví dụ: BID_UPDATE, AUCTION_UPDATE...)
+                notifyListeners(msg);
+            }
+        } catch (IOException e) {
+            if (running) {
+                System.err.println("[NetworkClient] Lỗi đọc luồng Socket: " + e.getMessage());
+            }
+        } finally {
+            if (running) {
+                disconnect();
+            }
+        }
+    }
+
+    /**
+     * Phát thông điệp nhận được từ Server tới toàn bộ Listener đã đăng ký.
+     */
+    private void notifyListeners(Message msg) {
+        for (Consumer<Message> listener : listeners) {
+            try {
+                listener.accept(msg);
+            } catch (Exception e) {
+                System.err.println("[NetworkClient] Lỗi tại Listener Observer: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Gửi yêu cầu bất đồng bộ (Asynchronous) không gây khóa luồng giao diện (Non-blocking UI).
+     *
+     * @param request gói tin Message gửi đi
+     * @return CompletableFuture chứa kết quả Message phản hồi
+     */
+    public CompletableFuture<Message> sendRequestAsync(Message request) {
+        if (request == null) {
+            return CompletableFuture.completedFuture(createErrorResponse("UNKNOWN", "Request không được để null!"));
+        }
+
+        CompletableFuture<Message> future = new CompletableFuture<>();
+
+        try {
+            if (!isConnected()) {
+                connect();
+            }
+
+            PendingRequest pending = new PendingRequest(request.getAction(), future);
+            pendingRequests.add(pending);
+
+            String jsonRequest = gson.toJson(request);
+            synchronized (outLock) {
+                if (out == null) {
+                    throw new IOException("Luồng xuất PrintWriter bị null");
+                }
+                out.println(jsonRequest);
+                out.flush();
+            }
+            System.out.println("[NetworkClient] Gửi: " + jsonRequest);
+
+        } catch (IOException e) {
+            System.err.println("[NetworkClient] Lỗi truyền thông Socket: " + e.getMessage());
+            disconnect();
+            return CompletableFuture.completedFuture(
+                    createErrorResponse(request.getAction(), "Lỗi mạng hoặc không thể kết nối tới Server (" + host + ":" + port + "): " + e.getMessage())
+            );
+        } catch (Exception e) {
+            System.err.println("[NetworkClient] Lỗi xử lý yêu cầu: " + e.getMessage());
+            return CompletableFuture.completedFuture(
+                    createErrorResponse(request.getAction(), "Lỗi xử lý yêu cầu: " + e.getMessage())
+            );
+        }
+
+        return future;
+    }
+
     /**
      * Gửi yêu cầu (Message) sang Server và đợi nhận gói tin phản hồi (Message) tương ứng.
-     * Luồng thực thi an toàn (Thread-safe) nhờ cơ chế synchronized.
      *
      * @param request gói tin Message gửi đi
      * @return gói tin Message phản hồi từ Server, hoặc Message thông báo lỗi nếu có sự cố mạng
      */
-    public synchronized Message sendRequest(Message request) {
+    public Message sendRequest(Message request) {
         if (request == null) {
             return createErrorResponse("UNKNOWN", "Request không được để null!");
         }
 
         try {
-            // 1. Tự động kết nối lại nếu chưa kết nối
-            if (!isConnected()) {
-                connect();
-            }
-
-            // 2. Chuyển Message sang chuỗi JSON và gửi qua Socket
-            String jsonRequest = gson.toJson(request);
-            out.println(jsonRequest);
-            System.out.println("[NetworkClient] Gửi: " + jsonRequest);
-
-            // 3. Đợi đọc phản hồi 1 dòng JSON từ Server
-            String jsonResponse = in.readLine();
-            if (jsonResponse == null) {
-                disconnect();
-                return createErrorResponse(request.getAction(), "Máy chủ đã đóng kết nối đột ngột.");
-            }
-
-            System.out.println("[NetworkClient] Nhận: " + jsonResponse);
-
-            // 4. Giải mã chuỗi JSON thành đối tượng Message
-            return gson.fromJson(jsonResponse, Message.class);
-
-        } catch (IOException e) {
-            System.err.println("[NetworkClient] Lỗi truyền thông Socket: " + e.getMessage());
-            disconnect();
-            return createErrorResponse(request.getAction(), "Lỗi mạng hoặc không thể kết nối tới Server (" + host + ":" + port + "): " + e.getMessage());
-        } catch (Exception e) {
-            System.err.println("[NetworkClient] Lỗi xử lý dữ liệu: " + e.getMessage());
-            return createErrorResponse(request.getAction(), "Lỗi định dạng dữ liệu phản hồi: " + e.getMessage());
+            return sendRequestAsync(request).get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            System.err.println("[NetworkClient] Lỗi truyền thông Socket: Read timed out");
+            pendingRequests.removeIf(p -> p.action != null && p.action.equalsIgnoreCase(request.getAction()));
+            return createErrorResponse(request.getAction(), "Lỗi mạng hoặc không thể kết nối tới Server (" + host + ":" + port + "): Read timed out");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            return createErrorResponse(request.getAction(), "Lỗi thực thi: " + cause.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return createErrorResponse(request.getAction(), "Yêu cầu bị gián đoạn: " + e.getMessage());
         }
     }
 

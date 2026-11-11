@@ -8,8 +8,10 @@ import com.auction.model.Admin;
 import com.auction.model.Bidder;
 import com.auction.model.Seller;
 import com.auction.model.User;
+import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
@@ -22,6 +24,7 @@ import java.util.Map;
 /**
  * Controller điều khiển giao diện Đăng nhập (LoginView.fxml).
  * Kế thừa BaseController để tái sử dụng toàn bộ hàm chuyển Scene, xử lý lỗi và quản lý Focus.
+ * Hỗ trợ giao tiếp mạng bất đồng bộ (Non-blocking UI) đảm bảo ứng dụng không bị đơ giật.
  */
 public class LoginController extends BaseController {
 
@@ -41,6 +44,9 @@ public class LoginController extends BaseController {
     private PasswordField txtPassword;
 
     @FXML
+    private Button btnLogin;
+
+    @FXML
     private Label lblError;
 
     /**
@@ -58,6 +64,7 @@ public class LoginController extends BaseController {
 
     /**
      * Xử lý đăng nhập khi người dùng nhấn nút "Đăng nhập" hoặc phím Enter.
+     * Sử dụng luồng bất đồng bộ (Non-blocking) để giao diện mượt mà.
      *
      * @param event sự kiện ActionEvent
      */
@@ -87,6 +94,9 @@ public class LoginController extends BaseController {
         clearMessage(lblError);
         System.out.println("[LoginController] Đang xử lý đăng nhập cho: " + username);
 
+        // Kích hoạt trạng thái đang xử lý (vô hiệu hóa nút và ô nhập để chống spam click)
+        setLoading(true);
+
         try {
             // 1. Tạo gói tin yêu cầu LOGIN
             Map<String, String> credentials = new HashMap<>();
@@ -94,46 +104,70 @@ public class LoginController extends BaseController {
             credentials.put("password", password);
             Message loginReq = Message.request(Message.ACTION_LOGIN, credentials);
 
-            // 2. Gửi yêu cầu qua Socket TCP
-            Message response = NetworkClient.getInstance().sendRequest(loginReq);
-
-            User user = null;
-            if (response != null && response.isSuccess()) {
-                // Server thật phản hồi thành công kèm thông tin User
-                user = response.parsePayload(User.class);
-            }
-
-            // 3. Nếu chưa có server thật đang chạy (hoặc môi trường test), fallback linh hoạt để thử nghiệm UI
-            if (user == null) {
-                System.out.println("[LoginController] Server chưa phản hồi đối tượng User hợp lệ. " +
-                        "Tự động kích hoạt phiên đăng nhập tương ứng để phục vụ kiểm thử giao diện.");
-
-                if (username.toLowerCase().contains("admin")) {
-                    user = new Admin(1, username, password);
-                } else if (username.toLowerCase().contains("bidder")) {
-                    user = new Bidder(1, username, password);
-                } else {
-                    user = new Seller(1, username, password);
-                }
-            }
-
-            // 4. Lưu User vào SessionManager
-            SessionManager.getInstance().setCurrentUser(user);
-            System.out.println("[LoginController] Đăng nhập thành công với vai trò: " + user.getClass().getSimpleName());
-
-            // 5. Điều hướng theo phân quyền
-            if (user instanceof Admin) {
-                switchToScene(event, "/views/AdminView.fxml", "Hệ thống Đấu giá - Kênh Quản trị viên (Admin)");
-            } else if (username.toLowerCase().contains("history")) {
-                switchToScene(event, "/views/HistoryView.fxml", "Hệ thống Đấu giá - Lịch sử giao dịch & đấu giá");
-            } else if (user instanceof Bidder) {
-                switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
-            } else {
-                switchToScene(event, "/views/SellerView.fxml", "Hệ thống Đấu giá - Kênh Người bán (Seller)");
-            }
+            // 2. Gửi yêu cầu qua Socket TCP bất đồng bộ (Non-blocking background thread)
+            NetworkClient.getInstance().sendRequestAsync(loginReq)
+                    .thenAcceptAsync(response -> {
+                        setLoading(false);
+                        processLoginResponse(event, response, username, password);
+                    }, Platform::runLater)
+                    .exceptionallyAsync(throwable -> {
+                        setLoading(false);
+                        showError(lblError, "Lỗi kết nối Server: " + throwable.getMessage());
+                        return null;
+                    }, Platform::runLater);
 
         } catch (Exception e) {
-            showError(lblError, "Lỗi kết nối Server: " + e.getMessage());
+            setLoading(false);
+            showError(lblError, "Lỗi khởi tạo yêu cầu: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Xử lý gói tin phản hồi đăng nhập từ Server trên luồng JavaFX UI.
+     * Xác thực 100% qua Socket Server và CSDL MySQL thực tế (không dùng mock offline).
+     */
+    private void processLoginResponse(ActionEvent event, Message response, String username, String password) {
+        if (response != null && response.isSuccess()) {
+            User user = response.parsePayload(User.class);
+            if (user != null) {
+                // Lưu User vào SessionManager
+                SessionManager.getInstance().setCurrentUser(user);
+                System.out.println("[LoginController] Đăng nhập CSDL thành công cho: " + user.getUsername() + " (" + user.getClass().getSimpleName() + ")");
+
+                // Điều hướng theo phân quyền
+                if (user instanceof Admin) {
+                    switchToScene(event, "/views/AdminView.fxml", "Hệ thống Đấu giá - Kênh Quản trị viên (Admin)");
+                } else if (user instanceof Bidder) {
+                    switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
+                } else {
+                    switchToScene(event, "/views/SellerView.fxml", "Hệ thống Đấu giá - Kênh Người bán (Seller)");
+                }
+                return;
+            }
+        }
+
+        // Báo lỗi rõ ràng từ máy chủ hoặc cảnh báo mất kết nối mạng
+        String errMsg = (response != null && response.getErrorMessage() != null)
+                ? response.getErrorMessage()
+                : "Không thể kết nối tới máy chủ (localhost:8888). Vui lòng khởi động AuctionServer!";
+        showError(lblError, errMsg);
+    }
+
+    /**
+     * Bật/tắt trạng thái xử lý giao diện (Loading state).
+     *
+     * @param loading true nếu đang xử lý mạng, false nếu đã xong
+     */
+    private void setLoading(boolean loading) {
+        if (btnLogin != null) {
+            btnLogin.setDisable(loading);
+            btnLogin.setText(loading ? "Đang xác thực..." : "Đăng nhập");
+        }
+        if (txtUsername != null) {
+            txtUsername.setDisable(loading);
+        }
+        if (txtPassword != null) {
+            txtPassword.setDisable(loading);
         }
     }
 

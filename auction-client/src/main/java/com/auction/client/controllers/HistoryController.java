@@ -1,11 +1,15 @@
 package com.auction.client.controllers;
 
+import com.auction.client.network.Message;
+import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
 import com.auction.model.Admin;
 import com.auction.model.BidTransaction;
 import com.auction.model.Bidder;
 import com.auction.model.Seller;
 import com.auction.model.User;
+import com.google.gson.reflect.TypeToken;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -18,6 +22,7 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.BorderPane;
 
+import java.lang.reflect.Type;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -150,21 +155,42 @@ public class HistoryController extends BaseController {
 
     /**
      * Tải danh sách lịch sử đấu giá (loadData theo đúng UML).
-     * Hiện đang nạp dữ liệu mẫu để kiểm thử UI; khi nối Server sẽ nhận danh sách qua NetworkClient.
+     * Gửi yêu cầu ACTION_GET_HISTORY tới Server qua NetworkClient và nạp từ CSDL MySQL.
      */
     @FXML
     public void loadData() {
         clearMessage(lblMessage);
         txtSearch.clear();
 
-        allHistoryData.clear();
-        allHistoryData.addAll(createMockTransactions());
-
-        listHistory.clear();
-        listHistory.addAll(allHistoryData);
-
-        updateSummaryStatistics();
-        showSuccess(lblMessage, "Đã làm mới dữ liệu lịch sử thành công (" + listHistory.size() + " giao dịch).");
+        NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_GET_HISTORY, null))
+                .thenAccept(response -> {
+                    Platform.runLater(() -> {
+                        if (response != null && response.isSuccess()) {
+                            Type listType = new TypeToken<List<BidTransaction>>() {}.getType();
+                            List<BidTransaction> serverTxs = response.parsePayload(listType);
+                            if (serverTxs != null) {
+                                allHistoryData.setAll(serverTxs);
+                                listHistory.setAll(allHistoryData);
+                                updateSummaryStatistics();
+                                showSuccess(lblMessage, "Đã đồng bộ " + listHistory.size() + " giao dịch từ CSDL Server!");
+                                return;
+                            }
+                        }
+                        allHistoryData.clear();
+                        listHistory.clear();
+                        updateSummaryStatistics();
+                        showError(lblMessage, "Chưa có giao dịch nào hoặc mất kết nối tới máy chủ.");
+                    });
+                })
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        allHistoryData.clear();
+                        listHistory.clear();
+                        updateSummaryStatistics();
+                        showError(lblMessage, "Lỗi kết nối Server: " + ex.getMessage());
+                    });
+                    return null;
+                });
     }
 
     /**
@@ -210,26 +236,6 @@ public class HistoryController extends BaseController {
             totalAmount += tx.getAmount();
         }
         lblTotalAmount.setText(String.format("Tổng giá trị: %,.0f VNĐ", totalAmount));
-    }
-
-    /**
-     * Tạo danh sách dữ liệu mẫu để kiểm tra giao diện độc lập.
-     */
-    private List<BidTransaction> createMockTransactions() {
-        User bidder1 = new Bidder(101, "nguyen_van_a", "pass123");
-        User bidder2 = new Bidder(102, "tran_thi_b", "pass123");
-        User bidder3 = new Bidder(103, "le_van_c", "pass123");
-
-        LocalDateTime now = LocalDateTime.now();
-
-        return List.of(
-                new BidTransaction(1, 10, 25500000.0, bidder1, now.minusHours(3).minusMinutes(12)),
-                new BidTransaction(2, 10, 26000000.0, bidder2, now.minusHours(2).minusMinutes(45)),
-                new BidTransaction(3, 10, 27500000.0, bidder3, now.minusHours(1).minusMinutes(10)),
-                new BidTransaction(4, 11, 450000000.0, bidder2, now.minusDays(1).minusHours(2)),
-                new BidTransaction(5, 11, 480000000.0, bidder1, now.minusHours(5)),
-                new BidTransaction(6, 12, 12000000.0, bidder3, now.minusMinutes(35))
-        );
     }
 
     // ==========================================

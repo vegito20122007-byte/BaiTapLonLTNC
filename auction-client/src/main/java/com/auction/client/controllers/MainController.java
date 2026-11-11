@@ -1,23 +1,42 @@
 package com.auction.client.controllers;
 
+import com.auction.client.network.Message;
+import com.auction.client.network.NetworkClient;
+import com.auction.client.session.SessionManager;
+import com.auction.client.util.ImageUtils;
+import com.auction.model.Auction;
+import com.auction.model.ItemFactory;
+import com.auction.model.Seller;
+import com.auction.model.User;
+import com.google.gson.reflect.TypeToken;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.VBox;
-import com.auction.client.session.SessionManager;
 
+import java.lang.reflect.Type;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
  * Controller điều khiển Trang chủ Sàn đấu giá (MainView.fxml).
- * Độc lập hoàn toàn, không phụ thuộc vào lớp ngoài, 0 lỗi đỏ biên dịch.
+ * Tích hợp NetworkClient giao tiếp với AuctionServer:
+ * - Tự động tải danh sách phiên đấu giá thực từ CSDL/Server qua ACTION_GET_AUCTIONS.
+ * - Lắng nghe thông báo Realtime (Observer Pattern) khi có phiên mới hoặc thay đổi giá.
+ * - Cho phép chọn phiên bất kỳ để chuyển thẳng vào phòng đấu giá BidderView tương ứng.
  */
 public class MainController extends BaseController {
+
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     @FXML
     private GridPane gridAuctions;
@@ -30,18 +49,29 @@ public class MainController extends BaseController {
     @FXML
     private Label lblActiveCount;
 
-    // Model dữ liệu nội bộ nhẹ cho giao diện Client
+    // Listener realtime nhận broadcast từ Server
+    private Consumer<Message> realtimeListener;
+
+    /**
+     * DTO hiển thị thẻ đấu giá trên giao diện Grid.
+     */
     public static class ClientAuctionItem {
-        private String name;
-        private String category;
-        private double currentPrice;
-        private String endTime;
+        private final String name;
+        private final String category;
+        private final double currentPrice;
+        private final String endTime;
+        private final Auction auction;
 
         public ClientAuctionItem(String name, String category, double currentPrice, String endTime) {
+            this(name, category, currentPrice, endTime, null);
+        }
+
+        public ClientAuctionItem(String name, String category, double currentPrice, String endTime, Auction auction) {
             this.name = name;
             this.category = category;
             this.currentPrice = currentPrice;
             this.endTime = endTime;
+            this.auction = auction;
         }
 
         public String getName() {
@@ -59,6 +89,10 @@ public class MainController extends BaseController {
         public String getEndTime() {
             return endTime;
         }
+
+        public Auction getAuction() {
+            return auction;
+        }
     }
 
     private final ObservableList<ClientAuctionItem> displayList = FXCollections.observableArrayList();
@@ -71,8 +105,92 @@ public class MainController extends BaseController {
         txtSearch.textProperty().addListener((obs, oldVal, newVal) -> filterAuctions());
         cbCategory.valueProperty().addListener((obs, oldVal, newVal) -> filterAuctions());
 
-        // Hiển thị trạng thái ban đầu
-        renderAuctionGrid(displayList);
+        // Hiển thị thông tin người dùng từ Session
+        User currentUser = SessionManager.getInstance().getCurrentUser();
+        if (currentUser != null && lblWelcome != null) {
+            lblWelcome.setText("Xin chào, " + currentUser.getUsername() + " (" + currentUser.getRole() + ")!");
+        }
+
+        // Đăng ký nhận thông báo realtime (Observer Pattern)
+        setupRealtimeObserver();
+
+        // Tải danh sách phiên đấu giá từ Server
+        loadAuctionsFromServer();
+    }
+
+    /**
+     * Đăng ký nhận thông báo phát thanh (Broadcast) từ Server khi có cập nhật.
+     */
+    private void setupRealtimeObserver() {
+        realtimeListener = msg -> {
+            if (msg == null || msg.getAction() == null) {
+                return;
+            }
+            String action = msg.getAction().toUpperCase();
+            if (Message.ACTION_AUCTION_UPDATE.equals(action)
+                    || Message.ACTION_BID_UPDATE.equals(action)
+                    || Message.ACTION_DELETE_AUCTION.equals(action)
+                    || Message.ACTION_CREATE_AUCTION.equals(action)) {
+                Platform.runLater(this::loadAuctionsFromServer);
+            }
+        };
+        NetworkClient.getInstance().addListener(realtimeListener);
+    }
+
+    /**
+     * Tải danh sách phiên đấu giá bất đồng bộ từ Server qua ACTION_GET_AUCTIONS.
+     * Toàn bộ dữ liệu hiển thị đến từ CSDL MySQL thực tế (không dùng mock offline).
+     */
+    public void loadAuctionsFromServer() {
+        if (lblActiveCount != null) {
+            lblActiveCount.setText("Đang tải dữ liệu từ CSDL...");
+        }
+
+        NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_GET_AUCTIONS, null))
+                .thenAccept(response -> {
+                    Platform.runLater(() -> {
+                        if (response != null && response.isSuccess()) {
+                            Type listType = new TypeToken<List<Auction>>() {}.getType();
+                            List<Auction> serverAuctions = response.parsePayload(listType);
+                            if (serverAuctions != null) {
+                                updateDisplayListFromAuctions(serverAuctions);
+                                return;
+                            }
+                        }
+                        displayList.clear();
+                        filterAuctions();
+                        if (lblActiveCount != null) {
+                            lblActiveCount.setText("Chưa có phiên đấu giá hoặc mất kết nối Server.");
+                        }
+                    });
+                })
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> {
+                        displayList.clear();
+                        filterAuctions();
+                        if (lblActiveCount != null) {
+                            lblActiveCount.setText("Lỗi kết nối máy chủ: " + ex.getMessage());
+                        }
+                    });
+                    return null;
+                });
+    }
+
+    private void updateDisplayListFromAuctions(List<Auction> serverAuctions) {
+        displayList.clear();
+        for (Auction a : serverAuctions) {
+            String category = (a.getItem() != null && a.getItem().getCategory() != null)
+                    ? a.getItem().getCategory() : "Khác";
+            double price = a.getMaxBid() > 0 ? a.getMaxBid() : a.getStartingPrice();
+            String end = a.getEndTime() != null ? a.getEndTime().format(DATE_FORMATTER) : "N/A";
+
+            displayList.add(new ClientAuctionItem(a.getName(), category, price, end, a));
+        }
+
+        if (lblActiveCount != null) {
+            lblActiveCount.setText(String.format("%,d phiên đang mở (CSDL thực)", displayList.size()));
+        }
+        filterAuctions();
     }
 
     public void addAuctionItem(String name, String category, double currentPrice, String endTime) {
@@ -129,8 +247,27 @@ public class MainController extends BaseController {
         card.setPrefWidth(260);
         card.setStyle("-fx-background-color: white; -fx-background-radius: 8; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.08), 8, 0, 0, 2);");
 
+        // Ảnh thumbnail sản phẩm nếu có
+        if (item.getAuction() != null && item.getAuction().getItem() != null) {
+            String imgData = item.getAuction().getItem().getImageData();
+            if (imgData != null && !imgData.isBlank()) {
+                try {
+                    ImageView thumb = new ImageView(ImageUtils.base64ToImage(imgData));
+                    thumb.setFitWidth(236);
+                    thumb.setFitHeight(130);
+                    thumb.setPreserveRatio(true);
+                    thumb.setStyle("-fx-background-radius: 6;");
+                    card.getChildren().add(thumb);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
         Label lblTitle = new Label(item.getName());
         lblTitle.setStyle("-fx-font-weight: bold; -fx-font-size: 14;");
+
+        Label lblCategoryTag = new Label("Danh mục: " + item.getCategory());
+        lblCategoryTag.setStyle("-fx-text-fill: #1a73e8; -fx-font-size: 11; -fx-background-color: #e8f0fe; -fx-padding: 2 6; -fx-background-radius: 4;");
 
         Label lblPrice = new Label(String.format("Giá hiện tại: %,.0f VNĐ", item.getCurrentPrice()));
         lblPrice.setStyle("-fx-text-fill: #1e8e3e; -fx-font-weight: bold;");
@@ -141,15 +278,30 @@ public class MainController extends BaseController {
         Button btnBid = new Button("Vào đấu giá →");
         btnBid.setMaxWidth(Double.MAX_VALUE);
         btnBid.setStyle("-fx-background-color: #1a73e8; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
-        btnBid.setOnAction(e -> handleOpenAuctionRoom(e));
 
-        card.getChildren().addAll(lblTitle, lblPrice, lblEnd, btnBid);
+        // Chuyển sang BidderView và nạp thông tin phiên được click
+        btnBid.setOnAction(e -> {
+            cleanupListener();
+            BidderController controller = switchSceneWithController(e, "/views/BidderView.fxml", "Phòng đấu giá trực tiếp - " + item.getName());
+            if (controller != null && item.getAuction() != null) {
+                controller.setAuction(item.getAuction());
+            }
+        });
+
+        card.getChildren().addAll(lblTitle, lblCategoryTag, lblPrice, lblEnd, btnBid);
         return card;
     }
 
     @FXML
     public void handleOpenAuctionRoom(ActionEvent event) {
-        switchToScene(event, "/views/BidderView.fxml", "Phòng đấu giá trực tiếp");
+        cleanupListener();
+        BidderController controller = switchSceneWithController(event, "/views/BidderView.fxml", "Phòng đấu giá trực tiếp");
+        if (controller != null && !displayList.isEmpty()) {
+            Auction target = displayList.get(0).getAuction();
+            if (target != null) {
+                controller.setAuction(target);
+            }
+        }
     }
 
     @FXML
@@ -157,26 +309,25 @@ public class MainController extends BaseController {
         Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
         confirmAlert.setTitle("Xác nhận đăng xuất");
         confirmAlert.setHeaderText(null);
-        confirmAlert.setContentText("Bạn có chắc chắn muốn đăng xuất khỏi tài khoản Bidder không?");
+        confirmAlert.setContentText("Bạn có chắc chắn muốn đăng xuất khỏi tài khoản không?");
 
         confirmAlert.showAndWait().ifPresent(response -> {
             if (response == ButtonType.OK) {
-                // 1. Xóa sạch dữ liệu phiên đăng nhập
+                cleanupListener();
                 SessionManager.getInstance().clear();
-                // 2. Chuyển về màn hình LoginView
                 switchToScene(event, "/views/LoginView.fxml", "Hệ thống Đấu giá Trực tuyến - Đăng nhập");
-                // Kiểm tra xem đã có LoginView của bạn số 3 chưa
-                if (getClass().getResource("/views/LoginView.fxml") != null) {
-                    switchToScene(event, "/views/LoginView.fxml", "Đăng nhập hệ thống Đấu giá");
-                } else {
-                    // Nếu chưa có, hiện thông báo và đóng ứng dụng hoặc giữ nguyên
-                    Alert infoAlert = new Alert(Alert.AlertType.INFORMATION);
-                    infoAlert.setTitle("Thông báo");
-                    infoAlert.setHeaderText("Đã đăng xuất thành công!");
-                    infoAlert.setContentText("Màn hình LoginView.fxml đang được Vị trí 3 phát triển. Sẽ tự động kết nối khi gộp nhánh chung!");
-                    infoAlert.showAndWait();
-                }
             }
         });
+    }
+
+    private void cleanupListener() {
+        if (realtimeListener != null) {
+            NetworkClient.getInstance().removeListener(realtimeListener);
+            realtimeListener = null;
+        }
+    }
+
+    public ObservableList<ClientAuctionItem> getDisplayList() {
+        return displayList;
     }
 }

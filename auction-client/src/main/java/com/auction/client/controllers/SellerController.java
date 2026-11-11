@@ -1,9 +1,13 @@
 package com.auction.client.controllers;
 
+import com.auction.client.network.Message;
+import com.auction.client.network.NetworkClient;
 import com.auction.client.session.SessionManager;
 import com.auction.client.util.ImageUtils;
 import com.auction.client.util.ValidationUtils;
 import com.auction.model.*;
+import com.google.gson.reflect.TypeToken;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -18,9 +22,14 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.lang.reflect.Type;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * Controller điều khiển giao diện Người bán (SellerView.fxml).
@@ -32,6 +41,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * - handleDeleteAuction(event: ActionEvent)
  * - handleSelectImage()
  * - loadData()
+ *
+ * Tích hợp NetworkClient giao tiếp với AuctionServer và Observer realtime.
  */
 public class SellerController extends BaseController {
 
@@ -99,15 +110,18 @@ public class SellerController extends BaseController {
     private Label lblMessage;
 
     // Danh sách quan sát chứa dữ liệu các phiên đấu giá
-    private ObservableList<Auction> auctionDataList = FXCollections.observableArrayList();
+    private final ObservableList<Auction> auctionDataList = FXCollections.observableArrayList();
 
     // Chuỗi mã hóa ảnh Base64
     private String encodedImage;
 
-    // Bộ sinh ID tạm thời phục vụ kiểm thử dữ liệu cục bộ
+    // Bộ sinh ID tạm thời phục vụ kiểm thử dữ liệu cục bộ khi Offline
     private static final AtomicInteger AUTO_ID_GEN = new AtomicInteger(100);
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
+    // Listener realtime nhận broadcast từ Server
+    private Consumer<Message> realtimeListener;
 
     /**
      * Vòng đời khởi tạo giao diện.
@@ -154,33 +168,79 @@ public class SellerController extends BaseController {
             }
         });
 
+        auctionTableView.setItems(auctionDataList);
+
+        // Đăng ký nhận thông báo realtime (Observer Pattern)
+        setupRealtimeObserver();
+
         // Tải dữ liệu ban đầu
         loadData();
     }
 
     /**
-     * Tải danh sách phiên đấu giá của Người bán (theo sơ đồ UML).
+     * Đăng ký nhận cập nhật Realtime từ Server (Observer Pattern).
+     */
+    private void setupRealtimeObserver() {
+        realtimeListener = msg -> {
+            if (msg == null || msg.getAction() == null) {
+                return;
+            }
+            String action = msg.getAction().toUpperCase();
+            if (Message.ACTION_BID_UPDATE.equals(action)) {
+                Auction updated = msg.parsePayload(Auction.class);
+                if (updated != null && updated.getId() != null) {
+                    Platform.runLater(() -> {
+                        for (int i = 0; i < auctionDataList.size(); i++) {
+                            if (updated.getId().equals(auctionDataList.get(i).getId())) {
+                                auctionDataList.set(i, updated);
+                                auctionTableView.refresh();
+                                showSuccess(lblMessage, "🔔 Phiên #" + updated.getId() + " vừa có lượt đặt giá mới: " + String.format("%,.0f VNĐ", updated.getMaxBid()));
+                                break;
+                            }
+                        }
+                    });
+                }
+            } else if (Message.ACTION_AUCTION_UPDATE.equals(action) || Message.ACTION_DELETE_AUCTION.equals(action)) {
+                Platform.runLater(this::loadData);
+            }
+        };
+        NetworkClient.getInstance().addListener(realtimeListener);
+    }
+
+    /**
+     * Tải danh sách phiên đấu giá của Người bán từ Server (theo sơ đồ UML).
+     * Đọc trực tiếp từ CSDL MySQL qua Socket (không dùng mock offline).
      */
     public void loadData() {
-        if (auctionDataList.isEmpty()) {
-            // Dữ liệu mẫu ban đầu để Seller kiểm tra giao diện trực quan
-            User currentUser = SessionManager.getInstance().getCurrentUser();
-            Seller seller = (currentUser instanceof Seller) ? (Seller) currentUser : new Seller(1, "seller_user", "pass");
+        NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_GET_AUCTIONS, null))
+                .thenAccept(response -> {
+                    Platform.runLater(() -> {
+                        if (response != null && response.isSuccess()) {
+                            Type listType = new TypeToken<List<Auction>>() {}.getType();
+                            List<Auction> serverAuctions = response.parsePayload(listType);
+                            if (serverAuctions != null) {
+                                User currentUser = SessionManager.getInstance().getCurrentUser();
+                                Integer sellerId = (currentUser != null) ? currentUser.getId() : null;
 
-            Item sampleItem1 = ItemFactory.createItem("ART", 1, "Tranh Sơn Dầu Phố Cổ", "Tranh sơn dầu vẽ Hà Nội thập niên 90", seller);
-            Auction sampleAuction1 = new Auction(1, "Đấu giá Tranh Phố Cổ", sampleItem1, seller, 5000000.0, 7000000.0,
-                    LocalDateTime.now(), LocalDateTime.now().plusDays(2));
-
-            Item sampleItem2 = ItemFactory.createItem("VEHICLE", 2, "Xe Máy Honda Cub 50", "Xe nguyên bản màu xanh ngọc", seller);
-            Auction sampleAuction2 = new Auction(2, "Đấu giá Honda Cub Cổ", sampleItem2, seller, 15000000.0, 18000000.0,
-                    LocalDateTime.now(), LocalDateTime.now().plusDays(5));
-
-            auctionDataList.addAll(sampleAuction1, sampleAuction2);
-        }
-
-        auctionTableView.setItems(auctionDataList);
-        auctionTableView.refresh();
-        showSuccess(lblMessage, "Đã cập nhật danh sách phiên đấu giá!");
+                                auctionDataList.clear();
+                                for (Auction a : serverAuctions) {
+                                    // Lọc đúng phiên của Seller này (nếu đã có ID người bán), hoặc hiển thị tất cả
+                                    if (sellerId == null || a.getSeller() == null || sellerId.equals(a.getSeller().getId())) {
+                                        auctionDataList.add(a);
+                                    }
+                                }
+                                auctionTableView.refresh();
+                                showSuccess(lblMessage, "Đã đồng bộ " + auctionDataList.size() + " phiên từ CSDL Server!");
+                                return;
+                            }
+                        }
+                        showError(lblMessage, "Không thể tải danh sách: Máy chủ chưa có dữ liệu hoặc mất kết nối.");
+                    });
+                })
+                .exceptionally(ex -> {
+                    Platform.runLater(() -> showError(lblMessage, "Lỗi kết nối Server: " + ex.getMessage()));
+                    return null;
+                });
     }
 
     /**
@@ -214,7 +274,7 @@ public class SellerController extends BaseController {
     // ==========================================
 
     /**
-     * Thêm một phiên đấu giá mới (theo sơ đồ UML).
+     * Thêm một phiên đấu giá mới gửi lên Server qua ACTION_CREATE_AUCTION (theo sơ đồ UML).
      *
      * @param event sự kiện ActionEvent
      */
@@ -256,28 +316,47 @@ public class SellerController extends BaseController {
 
             // 4. Lấy thông tin Seller từ Session
             User currentUser = SessionManager.getInstance().getCurrentUser();
-            Seller seller = (currentUser instanceof Seller) ? (Seller) currentUser : new Seller(1, "seller_user", "pass");
+            Seller seller = (currentUser instanceof Seller) ? (Seller) currentUser : null;
+            if (seller == null) {
+                showError(lblMessage, "Vui lòng đăng nhập với tài khoản Người bán (SELLER) để thực hiện thao tác này!");
+                return;
+            }
 
             // 5. Dùng ItemFactory để khởi tạo sản phẩm đúng tính chất OOP (Ảnh là Optional)
-            int newItemId = AUTO_ID_GEN.incrementAndGet();
-            Item item = ItemFactory.createItem(category, newItemId, name, description, seller);
+            int tempId = AUTO_ID_GEN.incrementAndGet();
+            Item item = ItemFactory.createItem(category, tempId, name, description, seller);
             if (this.encodedImage != null) {
                 item.setImageData(this.encodedImage);
             }
 
             // 6. Tạo đối tượng Auction mới
-            int newAuctionId = newItemId;
             LocalDateTime startTime = LocalDateTime.now();
             LocalDateTime endTime = startTime.plusMinutes(durationMinutes);
+            Auction newAuction = new Auction(tempId, name, item, seller, startPrice, reservePrice, startTime, endTime);
 
-            Auction newAuction = new Auction(newAuctionId, name, item, seller, startPrice, reservePrice, startTime, endTime);
-
-            // 7. Thêm vào danh sách quan sát
-            auctionDataList.add(newAuction);
-            auctionTableView.refresh();
-
-            showSuccess(lblMessage, "Tạo phiên đấu giá thành công: #" + newAuctionId);
-            handleClearForm(event);
+            // 7. Gửi lên AuctionServer qua TCP Socket
+            NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_CREATE_AUCTION, newAuction))
+                    .thenAccept(response -> {
+                        Platform.runLater(() -> {
+                            if (response != null && response.isSuccess()) {
+                                Auction created = response.parsePayload(Auction.class);
+                                Auction toAdd = created != null ? created : newAuction;
+                                auctionDataList.add(toAdd);
+                                auctionTableView.refresh();
+                                showSuccess(lblMessage, "Tạo phiên đấu giá thành công trên Server: #" + toAdd.getId());
+                                handleClearForm(event);
+                            } else {
+                                String err = (response != null && response.getErrorMessage() != null)
+                                        ? response.getErrorMessage()
+                                        : "Không thể kết nối tới máy chủ (localhost:8888).";
+                                showError(lblMessage, "Lỗi tạo phiên: " + err);
+                            }
+                        });
+                    })
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> showError(lblMessage, "Lỗi kết nối: " + ex.getMessage()));
+                        return null;
+                    });
 
         } catch (NumberFormatException e) {
             showError(lblMessage, "Giá tiền và thời lượng phải là số hợp lệ!");
@@ -287,7 +366,7 @@ public class SellerController extends BaseController {
     }
 
     /**
-     * Cập nhật thông tin phiên đấu giá đang chọn (theo sơ đồ UML).
+     * Cập nhật thông tin phiên đấu giá đang chọn lên Server (theo sơ đồ UML).
      *
      * @param event sự kiện ActionEvent
      */
@@ -325,15 +404,21 @@ public class SellerController extends BaseController {
                 }
             }
 
-            auctionTableView.refresh();
-            showSuccess(lblMessage, "Cập nhật thành công phiên #" + selected.getId());
+            NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_UPDATE_AUCTION, selected))
+                    .thenAccept(response -> {
+                        Platform.runLater(() -> {
+                            auctionTableView.refresh();
+                            showSuccess(lblMessage, "Cập nhật thành công phiên #" + selected.getId());
+                        });
+                    });
+
         } catch (NumberFormatException e) {
             showError(lblMessage, "Giá khởi điểm phải là số hợp lệ!");
         }
     }
 
     /**
-     * Xóa một phiên đấu giá khỏi danh sách (theo sơ đồ UML).
+     * Xóa một phiên đấu giá khỏi danh sách và Server (theo sơ đồ UML).
      *
      * @param event sự kiện ActionEvent
      */
@@ -345,10 +430,19 @@ public class SellerController extends BaseController {
             return;
         }
 
-        auctionDataList.remove(selected);
-        auctionTableView.refresh();
-        handleClearForm(event);
-        showSuccess(lblMessage, "Đã xóa phiên đấu giá #" + selected.getId());
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("auctionId", selected.getId());
+        payload.put("id", selected.getId());
+
+        NetworkClient.getInstance().sendRequestAsync(Message.request(Message.ACTION_DELETE_AUCTION, payload))
+                .thenAccept(response -> {
+                    Platform.runLater(() -> {
+                        auctionDataList.remove(selected);
+                        auctionTableView.refresh();
+                        handleClearForm(event);
+                        showSuccess(lblMessage, "Đã xóa phiên đấu giá #" + selected.getId());
+                    });
+                });
     }
 
     /**
@@ -372,6 +466,7 @@ public class SellerController extends BaseController {
      */
     @FXML
     public void handleOpenHistory(ActionEvent event) {
+        cleanupListener();
         switchToScene(event, "/views/HistoryView.fxml", "Hệ thống Đấu giá - Lịch sử giao dịch & đấu giá");
     }
 
@@ -380,8 +475,16 @@ public class SellerController extends BaseController {
      */
     @FXML
     public void handleLogout(ActionEvent event) {
+        cleanupListener();
         SessionManager.getInstance().clear();
         switchToScene(event, "/views/LoginView.fxml", "Hệ thống Đấu giá Trực tuyến - Đăng nhập");
+    }
+
+    private void cleanupListener() {
+        if (realtimeListener != null) {
+            NetworkClient.getInstance().removeListener(realtimeListener);
+            realtimeListener = null;
+        }
     }
 
     /**
@@ -409,5 +512,9 @@ public class SellerController extends BaseController {
                 this.encodedImage = null;
             }
         }
+    }
+
+    public ObservableList<Auction> getAuctionDataList() {
+        return auctionDataList;
     }
 }

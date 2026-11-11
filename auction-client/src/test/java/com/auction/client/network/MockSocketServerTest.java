@@ -14,6 +14,7 @@ import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -137,7 +138,6 @@ class MockSocketServerTest {
     @DisplayName("Gửi Message LOGIN thành công và nhận phản hồi SUCCESS")
     void testSendRequestSuccess() {
         NetworkClient client = NetworkClient.getInstance();
-
         Message loginRequest = Message.request(Message.ACTION_LOGIN, "{\"username\":\"admin\",\"password\":\"123\"}");
         Message response = client.sendRequest(loginRequest);
 
@@ -258,5 +258,20 @@ class MockSocketServerTest {
         assertEquals("ERROR", response.getStatus());
         assertTrue(response.getErrorMessage().contains("Lỗi mạng") || response.getErrorMessage().contains("timed out"),
                 "Phải phát hiện lỗi Timeout và không treo luồng gọi");
+    }
+
+    @Test
+    @DisplayName("Gửi yêu cầu bất đồng bộ (sendRequestAsync) trả về CompletableFuture thành công")
+    void testSendRequestAsync() throws Exception {
+        NetworkClient client = NetworkClient.getInstance();
+        Message request = Message.request("PING", null);
+
+        CompletableFuture<Message> future = client.sendRequestAsync(request);
+        assertNotNull(future);
+
+        Message response = future.get(3, TimeUnit.SECONDS);
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+        assertEquals("PONG", response.getAction());
     }
 }

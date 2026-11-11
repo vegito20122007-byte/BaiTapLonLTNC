@@ -3,9 +3,11 @@ package com.auction.client.controllers;
 import com.auction.client.network.Message;
 import com.auction.client.network.NetworkClient;
 import com.auction.client.util.ValidationUtils;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
@@ -19,6 +21,7 @@ import java.util.Map;
 /**
  * Controller điều khiển giao diện Đăng ký (RegisterView.fxml).
  * Kế thừa BaseController để tái sử dụng toàn bộ hàm chuyển Scene, xử lý lỗi và quản lý Focus.
+ * Hỗ trợ giao tiếp mạng bất đồng bộ (Non-blocking UI) đảm bảo giao diện phản hồi mượt mà.
  */
 public class RegisterController extends BaseController {
 
@@ -42,6 +45,9 @@ public class RegisterController extends BaseController {
 
     @FXML
     private ComboBox<String> cbRole;
+
+    @FXML
+    private Button btnRegister;
 
     @FXML
     private Label lblMessage;
@@ -69,6 +75,7 @@ public class RegisterController extends BaseController {
 
     /**
      * Xử lý đăng ký tài khoản mới khi nhấn nút "Đăng ký tài khoản".
+     * Sử dụng luồng bất đồng bộ (Non-blocking) để giao diện không bị giật lag.
      *
      * @param event sự kiện ActionEvent
      */
@@ -117,7 +124,11 @@ public class RegisterController extends BaseController {
         // 6. Lấy mã vai trò chuẩn (BIDDER hoặc SELLER)
         String roleCode = selectedRole.contains("SELLER") ? "SELLER" : "BIDDER";
 
+        clearMessage(lblMessage);
         System.out.println("[RegisterController] Tiến hành đăng ký tài khoản: " + username + " (" + roleCode + ")");
+
+        // Kích hoạt trạng thái đang tải (vô hiệu hóa các nút và ô nhập để chống spam click)
+        setLoading(true);
 
         try {
             // 1. Đóng gói dữ liệu đăng ký thành Message
@@ -127,24 +138,54 @@ public class RegisterController extends BaseController {
             regData.put("role", roleCode);
             Message regReq = Message.request(Message.ACTION_REGISTER, regData);
 
-            // 2. Gửi yêu cầu qua Socket TCP
-            Message response = NetworkClient.getInstance().sendRequest(regReq);
-
-            if (response != null && response.isSuccess()) {
-                showSuccess(lblMessage, "Đăng ký tài khoản thành công! Đang chuyển về Đăng nhập...");
-                switchToLogin(event);
-            } else if (response != null && response.getErrorMessage() != null && response.getErrorMessage().contains("Lỗi mạng")) {
-                // Server chưa chạy: mô phỏng đăng ký thành công để kiểm thử giao diện
-                System.out.println("[RegisterController] Server offline (" + response.getErrorMessage() + "), mô phỏng thành công cho kiểm thử UI.");
-                showSuccess(lblMessage, "Đăng ký thành công (Chế độ kiểm thử)! Đang chuyển về Đăng nhập...");
-                switchToLogin(event);
-            } else {
-                showError(lblMessage, response != null ? response.getErrorMessage() : "Đăng ký tài khoản thất bại!");
-            }
+            // 2. Gửi yêu cầu qua Socket TCP bất đồng bộ (Non-blocking background thread)
+            NetworkClient.getInstance().sendRequestAsync(regReq)
+                    .thenAcceptAsync(response -> {
+                        setLoading(false);
+                        processRegisterResponse(event, response, username, password, roleCode);
+                    }, Platform::runLater)
+                    .exceptionallyAsync(throwable -> {
+                        setLoading(false);
+                        showError(lblMessage, "Lỗi kết nối khi đăng ký: " + throwable.getMessage());
+                        return null;
+                    }, Platform::runLater);
 
         } catch (Exception e) {
-            showError(lblMessage, "Lỗi kết nối khi đăng ký: " + e.getMessage());
+            setLoading(false);
+            showError(lblMessage, "Lỗi khởi tạo yêu cầu: " + e.getMessage());
         }
+    }
+
+    /**
+     * Xử lý gói tin phản hồi đăng ký từ Server trên luồng JavaFX UI.
+     * Lưu trữ trực tiếp vào CSDL MySQL (không dùng mock offline).
+     */
+    private void processRegisterResponse(ActionEvent event, Message response, String username, String password, String roleCode) {
+        if (response != null && response.isSuccess()) {
+            showSuccess(lblMessage, "Đăng ký tài khoản thành công vào CSDL! Đang chuyển về Đăng nhập...");
+            switchToLogin(event);
+        } else {
+            String errMsg = (response != null && response.getErrorMessage() != null)
+                    ? response.getErrorMessage()
+                    : "Không thể kết nối tới máy chủ (localhost:8888). Vui lòng thử lại!";
+            showError(lblMessage, errMsg);
+        }
+    }
+
+    /**
+     * Bật/tắt trạng thái xử lý giao diện (Loading state).
+     *
+     * @param loading true nếu đang xử lý mạng, false nếu đã xong
+     */
+    private void setLoading(boolean loading) {
+        if (btnRegister != null) {
+            btnRegister.setDisable(loading);
+            btnRegister.setText(loading ? "Đang xử lý..." : "Đăng ký tài khoản");
+        }
+        if (txtUsername != null) txtUsername.setDisable(loading);
+        if (txtPassword != null) txtPassword.setDisable(loading);
+        if (txtConfirmPassword != null) txtConfirmPassword.setDisable(loading);
+        if (cbRole != null) cbRole.setDisable(loading);
     }
 
     /**

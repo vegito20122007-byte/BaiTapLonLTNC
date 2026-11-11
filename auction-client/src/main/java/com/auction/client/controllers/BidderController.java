@@ -1,7 +1,15 @@
 package com.auction.client.controllers;
 
+import com.auction.client.network.Message;
+import com.auction.client.network.NetworkClient;
+import com.auction.client.session.SessionManager;
+import com.auction.client.util.ImageUtils;
+import com.auction.model.Auction;
+import com.auction.model.Item;
+import com.auction.model.User;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
+import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.scene.chart.LineChart;
@@ -15,16 +23,20 @@ import java.text.DecimalFormatSymbols;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Controller điều khiển Phòng đấu giá trực tiếp (BidderView.fxml).
  * Tính năng hoàn chỉnh:
  * 1. Tự động thêm dấu phẩy (,) sau mỗi 3 chữ số khi gõ tiền (ví dụ: 9,000,000).
  * 2. Hiển thị rõ ràng Bước giá tối thiểu do Seller quy định.
- * 3. Chặn đứng troll giá kiểu Batman (bắt buộc đặt >= giá hiện tại + bước giá).
+ * 3. Chặn troll giá (bắt buộc đặt >= giá hiện tại + bước giá).
  * 4. Đồng hồ đếm ngược động theo giờ kết thúc của Seller + Anti-sniping (+60s).
  * 5. Vẽ biểu đồ biến động giá LineChart thời gian thực.
+ * 6. Tích hợp NetworkClient & Observer Pattern đón nhận ACTION_BID_UPDATE từ Server.
  */
 public class BidderController extends BaseController {
 
@@ -55,12 +67,16 @@ public class BidderController extends BaseController {
     @FXML private LineChart<String, Number> bidChart;
 
     // --- BIẾN QUẢN LÝ ---
+    private Auction currentAuction;
     private XYChart.Series<String, Number> priceSeries;
     private double currentPrice = 45000000.0;
-    private double minIncrement = 100000.0; // Bước giá tối thiểu mặc định do Seller quy định (100,000 VNĐ)
+    private double minIncrement = 100000.0; // Bước giá tối thiểu mặc định (100,000 VNĐ)
     private long remainingSeconds = 0;
     private Timeline countdownTimeline;
     private LocalDateTime endTimeOfSeller;
+
+    // Listener realtime nhận broadcast từ Server
+    private Consumer<Message> realtimeListener;
 
     // Định dạng dấu phẩy phân cách hàng nghìn (ví dụ: 9,000,000)
     private final DecimalFormat currencyFormatter = new DecimalFormat("#,###", new DecimalFormatSymbols(Locale.US));
@@ -73,6 +89,7 @@ public class BidderController extends BaseController {
         priceSeries = new XYChart.Series<>();
         priceSeries.setName("Diễn biến giá");
         if (bidChart != null) {
+            bidChart.getData().clear();
             bidChart.getData().add(priceSeries);
         }
 
@@ -81,15 +98,88 @@ public class BidderController extends BaseController {
         setupCurrencyFormatting(txtMaxBidLimit);
         setupCurrencyFormatting(txtIncrement);
 
-        // 3. Giả định phiên kết thúc sau 10 phút tính từ lúc mở phòng
+        // 3. Giả định phiên kết thúc sau 10 phút tính từ lúc mở phòng (nếu chưa truyền Auction cụ thể)
         LocalDateTime defaultEndTime = LocalDateTime.now().plusMinutes(10);
         setupCountdownFromSeller(defaultEndTime);
 
         // 4. Khởi tạo giá ban đầu và hiển thị
-        updatePriceDisplay(currentPrice, "Bidder_HienTai");
+        updatePriceDisplay(currentPrice, "Chưa có ai đặt");
         updateIncrementUI();
 
         priceSeries.getData().add(new XYChart.Data<>(LocalTime.now().format(timeFormatter), currentPrice));
+
+        // 5. Đăng ký Observer nhận gói tin realtime từ Server
+        setupRealtimeObserver();
+    }
+
+    /**
+     * Đăng ký nhận thông báo phát thanh (Broadcast) từ Server qua Observer Pattern.
+     */
+    private void setupRealtimeObserver() {
+        realtimeListener = msg -> {
+            if (msg == null || msg.getAction() == null) {
+                return;
+            }
+
+            if (Message.ACTION_BID_UPDATE.equalsIgnoreCase(msg.getAction())) {
+                try {
+                    Auction updated = msg.parsePayload(Auction.class);
+                    if (updated != null && currentAuction != null && updated.getId() != null
+                            && updated.getId().equals(currentAuction.getId())) {
+                        Platform.runLater(() -> {
+                            this.currentAuction = updated;
+                            double newPrice = updated.getMaxBid();
+                            String winner = (updated.getCurrentWinner() != null)
+                                    ? updated.getCurrentWinner().getUsername() : "Người dùng khác";
+                            executeBidSuccess(newPrice, winner + " (Vừa đặt)");
+
+                            // Nếu Server đã gia hạn Anti-sniping
+                            if (updated.getEndTime() != null) {
+                                setupCountdownFromSeller(updated.getEndTime());
+                            }
+                        });
+                    }
+                } catch (Exception e) {
+                    System.err.println("[BidderController] Lỗi xử lý ACTION_BID_UPDATE: " + e.getMessage());
+                }
+            }
+        };
+        NetworkClient.getInstance().addListener(realtimeListener);
+    }
+
+    /**
+     * Nạp dữ liệu một đối tượng Auction cụ thể từ MainController hoặc Server.
+     */
+    public void setAuction(Auction auction) {
+        if (auction == null) return;
+        this.currentAuction = auction;
+
+        String name = auction.getName();
+        double startPrice = auction.getStartingPrice();
+        double currPrice = auction.getMaxBid() > 0 ? auction.getMaxBid() : startPrice;
+        LocalDateTime end = auction.getEndTime();
+
+        if (auction.getItem() != null) {
+            Item item = auction.getItem();
+            if (item.getDescription() != null && lblDescription != null) {
+                lblDescription.setText(item.getDescription());
+            }
+            if (item.getCategory() != null && lblCategory != null) {
+                lblCategory.setText("Danh mục: " + item.getCategory());
+            }
+            if (item.getImageData() != null && !item.getImageData().isBlank() && imgProduct != null) {
+                try {
+                    imgProduct.setImage(ImageUtils.base64ToImage(item.getImageData()));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        String winner = auction.getCurrentWinner() != null ? auction.getCurrentWinner().getUsername() : "Chưa có ai đặt";
+        setAuctionInfo(name, startPrice, currPrice, this.minIncrement, end);
+        if (lblWinner != null) {
+            lblWinner.setText(winner);
+        }
     }
 
     /**
@@ -143,7 +233,7 @@ public class BidderController extends BaseController {
     }
 
     /**
-     * Hàm nhận dữ liệu trực tiếp từ Seller/Server mà không cần import lớp Auction
+     * Hàm nhận dữ liệu trực tiếp từ Seller/Server.
      */
     public void setAuctionInfo(String itemName, double startPrice, double currentPrice, double minIncrement, LocalDateTime endTime) {
         if (lblItemName != null && itemName != null) lblItemName.setText(itemName);
@@ -156,6 +246,11 @@ public class BidderController extends BaseController {
             setupCountdownFromSeller(endTime);
         }
         updateIncrementUI();
+
+        if (priceSeries != null) {
+            priceSeries.getData().clear();
+            priceSeries.getData().add(new XYChart.Data<>(LocalTime.now().format(timeFormatter), currentPrice));
+        }
     }
 
     public void setMinIncrement(double increment) {
@@ -215,7 +310,6 @@ public class BidderController extends BaseController {
                     lblAuctionStatus.setStyle("-fx-background-color: #d93025; -fx-padding: 5 12; -fx-background-radius: 12;");
                 }
                 if (btnPlaceBid != null) btnPlaceBid.setDisable(true);
-                showAlert("Hết giờ", "Phiên đấu giá do Seller quy định đã chính thức kết thúc!");
             }
         }));
         countdownTimeline.setCycleCount(Timeline.INDEFINITE);
@@ -256,15 +350,65 @@ public class BidderController extends BaseController {
                 return;
             }
 
-            // Đặt giá hợp lệ -> Cập nhật giá và vẽ đồ thị
-            executeBidSuccess(bidValue, "Bạn (Đang dẫn đầu)");
-            txtBidAmount.clear();
-
-            // Kích hoạt Anti-sniping nếu còn dưới 30 giây
-            if (remainingSeconds > 0 && remainingSeconds <= 30) {
-                extendEndTime(60);
-                showAlert("Anti-sniping", "Có lượt đặt giá ở phút chót! Phiên đấu giá được tự động gia hạn thêm 60 giây!");
+            if (btnPlaceBid != null) {
+                btnPlaceBid.setDisable(true);
             }
+
+            User currentUser = SessionManager.getInstance().getCurrentUser();
+            int bidderId = (currentUser != null && currentUser.getId() != null) ? currentUser.getId() : 3;
+            int auctionId = (currentAuction != null && currentAuction.getId() != null) ? currentAuction.getId() : 1;
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("auctionId", auctionId);
+            payload.put("bidderId", bidderId);
+            payload.put("amount", bidValue);
+            payload.put("bidAmount", bidValue);
+
+            Message request = Message.request(Message.ACTION_PLACE_BID, payload);
+
+            NetworkClient.getInstance().sendRequestAsync(request)
+                    .thenAccept(response -> {
+                        Platform.runLater(() -> {
+                            if (btnPlaceBid != null) {
+                                btnPlaceBid.setDisable(false);
+                            }
+
+                            if (response != null && response.isSuccess()) {
+                                Auction updated = response.parsePayload(Auction.class);
+                                if (updated != null) {
+                                    this.currentAuction = updated;
+                                    if (updated.getEndTime() != null) {
+                                        setupCountdownFromSeller(updated.getEndTime());
+                                    }
+                                }
+                                String username = currentUser != null ? currentUser.getUsername() : "Bạn";
+                                executeBidSuccess(bidValue, username + " (Đang dẫn đầu)");
+                                txtBidAmount.clear();
+
+                                // Kích hoạt Anti-sniping cảnh báo
+                                if (remainingSeconds > 0 && remainingSeconds <= 30) {
+                                    extendEndTime(60);
+                                    showAlert("Anti-sniping", "Có lượt đặt giá ở phút chót! Phiên đấu giá được tự động gia hạn thêm 60 giây!");
+                                } else {
+                                    showAlert("Thành công", "Bạn đã đặt giá thành công: " + currencyFormatter.format(bidValue) + " VNĐ!");
+                                }
+                            } else {
+                                String errMsg = (response != null && response.getErrorMessage() != null)
+                                        ? response.getErrorMessage()
+                                        : "Không thể kết nối tới máy chủ (localhost:8888).";
+                                showAlert("Đặt giá thất bại", errMsg);
+                            }
+                        });
+                    })
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            if (btnPlaceBid != null) {
+                                btnPlaceBid.setDisable(false);
+                            }
+                            showAlert("Lỗi", "Lỗi gửi yêu cầu đặt giá: " + ex.getMessage());
+                        });
+                        return null;
+                    });
 
         } catch (NumberFormatException e) {
             showAlert("Lỗi", "Số tiền nhập vào không hợp lệ!");
@@ -273,31 +417,27 @@ public class BidderController extends BaseController {
 
     @FXML
     public void handleQuickBid1(ActionEvent event) {
-        placeQuickBid(minIncrement, "Bạn (+" + currencyFormatter.format(minIncrement) + "đ)");
+        placeQuickBid(minIncrement);
     }
 
     @FXML
     public void handleQuickBid2(ActionEvent event) {
-        placeQuickBid(minIncrement * 2, "Bạn (+" + currencyFormatter.format(minIncrement * 2) + "đ)");
+        placeQuickBid(minIncrement * 2);
     }
 
     @FXML
     public void handleQuickBid3(ActionEvent event) {
-        placeQuickBid(minIncrement * 5, "Bạn (+" + currencyFormatter.format(minIncrement * 5) + "đ)");
+        placeQuickBid(minIncrement * 5);
     }
 
     @FXML public void handleQuickBid100k(ActionEvent event) { handleQuickBid1(event); }
     @FXML public void handleQuickBid500k(ActionEvent event) { handleQuickBid2(event); }
     @FXML public void handleQuickBid1M(ActionEvent event) { handleQuickBid3(event); }
 
-    private void placeQuickBid(double amountToAdd, String bidderLabel) {
+    private void placeQuickBid(double amountToAdd) {
         double newPrice = currentPrice + amountToAdd;
-        executeBidSuccess(newPrice, bidderLabel);
-
-        if (remainingSeconds > 0 && remainingSeconds <= 30) {
-            extendEndTime(60);
-            showAlert("Anti-sniping", "Có lượt đặt giá ở phút chót! Phiên đấu giá được tự động gia hạn thêm 60 giây!");
-        }
+        txtBidAmount.setText(currencyFormatter.format((long) newPrice));
+        handlePlaceBid(null);
     }
 
     private void executeBidSuccess(double newPrice, String winnerName) {
@@ -306,7 +446,9 @@ public class BidderController extends BaseController {
         updateIncrementUI();
 
         String nowTime = LocalTime.now().format(timeFormatter);
-        priceSeries.getData().add(new XYChart.Data<>(nowTime, newPrice));
+        if (priceSeries != null) {
+            priceSeries.getData().add(new XYChart.Data<>(nowTime, newPrice));
+        }
     }
 
     private void updatePriceDisplay(double price, String winner) {
@@ -336,10 +478,18 @@ public class BidderController extends BaseController {
 
     @FXML
     public void handleBackToMain(ActionEvent event) {
+        cleanupListener();
         if (countdownTimeline != null) {
             countdownTimeline.stop();
         }
         switchToScene(event, "/views/MainView.fxml", "Hệ thống Đấu giá Trực tuyến - Trang chủ");
+    }
+
+    private void cleanupListener() {
+        if (realtimeListener != null) {
+            NetworkClient.getInstance().removeListener(realtimeListener);
+            realtimeListener = null;
+        }
     }
 
     private void showAlert(String title, String content) {
@@ -348,5 +498,13 @@ public class BidderController extends BaseController {
         alert.setHeaderText(null);
         alert.setContentText(content);
         alert.showAndWait();
+    }
+
+    public Auction getCurrentAuction() {
+        return currentAuction;
+    }
+
+    public double getCurrentPrice() {
+        return currentPrice;
     }
 }
