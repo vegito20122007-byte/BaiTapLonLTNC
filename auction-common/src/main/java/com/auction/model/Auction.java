@@ -220,7 +220,9 @@ public class Auction extends Entity {
     public void setReservePrice(double reservePrice) { this.reservePrice = reservePrice; }
 
     public List<BidTransaction> getBids() { return bids; }
-    public void setBids(List<BidTransaction> bids) { this.bids = bids; }
+    public void setBids(List<BidTransaction> bids) {
+        this.bids = (bids != null) ? new ArrayList<>(bids) : new ArrayList<>();
+    }
 
     public List<AutoBidConfig> getAutoBidList() { return autoBidList; }
     public void setAutoBidList(List<AutoBidConfig> autoBidList) { this.autoBidList = autoBidList; }

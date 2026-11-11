@@ -1,5 +1,8 @@
 package com.auction.server;
 
+import com.auction.service.AuctionService;
+import com.auction.exception.AuctionException;
+
 import com.auction.dao.AuctionDAO;
 import com.auction.dao.BidTransactionDAO;
 import com.auction.dao.DBConnection;
@@ -49,18 +52,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class ClientHandler implements Runnable {
 
-    /**
-     * Bản đồ khóa đồng bộ (Lock) riêng cho từng `auctionId` nhằm chống Race Condition / Lost Update
-     * khi nhiều Client cùng đặt giá vào một phiên tại cùng một thời điểm.
-     */
-    private static final Map<Integer, Object> AUCTION_LOCKS = new ConcurrentHashMap<>();
-
-    /** Ngưỡng thời gian cuối phiên kích hoạt cơ chế gia hạn Anti-sniping (30 giây). */
-    private static final long ANTI_SNIPING_THRESHOLD_SECONDS = 30;
-
-    /** Thời gian tự động cộng thêm khi có lượt đặt giá ở phút chót (60 giây). */
-    private static final long ANTI_SNIPING_EXTENSION_SECONDS = 60;
-
     /** Kết nối Socket của Client (- socket: Socket). */
     private Socket socket;
 
@@ -72,6 +63,9 @@ public class ClientHandler implements Runnable {
 
     /** Đối tượng chuyển đổi JSON (- gson: Gson). */
     private Gson gson = GsonConfig.getGson();
+
+    /** Tầng nghiệp vụ xử lý logic đấu giá và khóa đa luồng (- auctionService: AuctionService). */
+    private final AuctionService auctionService = AuctionService.getInstance();
 
     public ClientHandler(Socket socket) {
         this.socket = socket;
@@ -306,8 +300,8 @@ public class ClientHandler implements Runnable {
     }
 
     /**
-     * Xử lý đặt giá đồng thời an toàn (PLACE_BID), kiểm tra gia hạn Anti-sniping
-     * và phát thông báo `BID_UPDATE` tức thời tới tất cả các Client qua `AuctionServer.broadcast()`.
+     * Xử lý yêu cầu đặt giá (PLACE_BID):
+     * Bóc tách JSON request -> gọi AuctionService xử lý đa luồng -> Broadcast kết quả cho các Client.
      */
     private Message handlePlaceBid(Message request) {
         JsonObject payload = parseJsonObject(request.getPayload());
@@ -319,48 +313,20 @@ public class ClientHandler implements Runnable {
             return Message.error(Message.ACTION_PLACE_BID, "Thông tin đặt giá (auctionId, bidderId, amount) không hợp lệ.");
         }
 
-        Object lock = AUCTION_LOCKS.computeIfAbsent(auctionId, k -> new Object());
-        synchronized (lock) {
-            IUserDAO userDAO = new UserDAO();
-            IAuctionDAO auctionDAO = new AuctionDAO();
-            IBidTransactionDAO bidDAO = new BidTransactionDAO();
+        try {
+            // 1. Gọi tầng Service xử lý (đã có ReentrantLock chống Race Condition & Anti-sniping)
+            Auction updatedAuction = auctionService.placeBid(auctionId, bidderId, amount);
 
-            Auction auction = auctionDAO.findById(auctionId);
-            if (auction == null) {
-                return Message.error(Message.ACTION_PLACE_BID, "Không tìm thấy phiên đấu giá #" + auctionId);
-            }
+            // 2. Phát thông báo realtime (Observer Pattern) cho mọi Client đang kết nối
+            AuctionServer.broadcast(Message.success(Message.ACTION_BID_UPDATE, updatedAuction));
 
-            User bidder = userDAO.findById(bidderId);
-            if (bidder == null) {
-                return Message.error(Message.ACTION_PLACE_BID, "Không tìm thấy người đặt giá #" + bidderId);
-            }
-
-            List<BidTransaction> existingBids = bidDAO.findByAuctionId(auctionId);
-            auction.setBids(existingBids);
-            if (auction.getStatus() == Status.OPEN) {
-                auction.setStatus(Status.RUNNING);
-            }
-
-            // Thực hiện đặt giá và kiểm tra hợp lệ
-            auction.placeBid(bidder, amount);
-
-            // Kiểm tra Anti-sniping: Nếu đặt giá trong 30 giây cuối trước endTime -> tự động gia hạn thêm 60 giây
-            LocalDateTime now = LocalDateTime.now();
-            if (auction.getEndTime() != null && auction.getEndTime().isAfter(now)) {
-                long remainingSeconds = Duration.between(now, auction.getEndTime()).getSeconds();
-                if (remainingSeconds <= ANTI_SNIPING_THRESHOLD_SECONDS) {
-                    auction.setEndTime(auction.getEndTime().plusSeconds(ANTI_SNIPING_EXTENSION_SECONDS));
-                }
-            }
-
-            // Lưu thông tin phiên và lượt đặt giá mới xuống CSDL
-            auctionDAO.update(auction);
-            BidTransaction newTx = new BidTransaction(null, auctionId, amount, bidder, now);
-            bidDAO.save(newTx);
-
-            // Phát thông báo realtime (Observer Pattern) cho mọi Client đang kết nối
-            AuctionServer.broadcast(Message.success(Message.ACTION_BID_UPDATE, auction));
-            return Message.success(Message.ACTION_PLACE_BID, auction);
+            // 3. Phản hồi thành công cho Client vừa đặt giá
+            return Message.success(Message.ACTION_PLACE_BID, updatedAuction);
+        } catch (AuctionException e) {
+            // Bắt các ngoại lệ nghiệp vụ (InvalidBidException, AuctionClosedException, ...)
+            return Message.error(Message.ACTION_PLACE_BID, e.getMessage());
+        } catch (Exception e) {
+            return Message.error(Message.ACTION_PLACE_BID, "Lỗi hệ thống: " + e.getMessage());
         }
     }
 
