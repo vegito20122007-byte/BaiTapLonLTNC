@@ -3,6 +3,7 @@ package com.auction.client.network;
 import com.auction.client.util.GsonConfig;
 
 import java.io.Serializable;
+import java.lang.reflect.Type;
 
 /**
  * Gói tin chuẩn trao đổi dữ liệu giữa Client và Server qua giao thức Socket TCP.
@@ -22,6 +23,10 @@ public class Message implements Serializable {
     public static final String ACTION_PLACE_BID = "PLACE_BID";
     public static final String ACTION_GET_HISTORY = "GET_HISTORY";
     public static final String ACTION_LOGOUT = "LOGOUT";
+    public static final String ACTION_SUBSCRIBE = "SUBSCRIBE";
+    public static final String ACTION_CHAT = "CHAT";
+    public static final String ACTION_BID_UPDATE = "BID_UPDATE";
+    public static final String ACTION_AUCTION_UPDATE = "AUCTION_UPDATE";
 
     // Các hằng số trạng thái (Status Constants)
     public static final String STATUS_SUCCESS = "SUCCESS";
@@ -106,6 +111,20 @@ public class Message implements Serializable {
             return null;
         }
         return GsonConfig.getGson().fromJson(payload, clazz);
+    }
+
+    /**
+     * Chuyển đổi payload dạng JSON sang đối tượng Java theo kiểu Type (hỗ trợ Generic Collection như List<Auction>).
+     *
+     * @param type kiểu đối tượng (ví dụ: new TypeToken<List<Auction>>(){}.getType())
+     * @param <T> loại kiểu
+     * @return đối tượng Java đã parse, hoặc null nếu payload trống
+     */
+    public <T> T parsePayload(Type type) {
+        if (payload == null || payload.isBlank()) {
+            return null;
+        }
+        return GsonConfig.getGson().fromJson(payload, type);
     }
 
     /**

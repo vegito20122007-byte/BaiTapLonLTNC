@@ -2,7 +2,6 @@ package com.auction.server;
 
 import com.auction.service.AuctionService;
 import com.auction.exception.AuctionException;
-
 import com.auction.dao.AuctionDAO;
 import com.auction.dao.BidTransactionDAO;
 import com.auction.dao.DBConnection;
@@ -307,7 +306,14 @@ public class ClientHandler implements Runnable {
         JsonObject payload = parseJsonObject(request.getPayload());
         int auctionId = payload.has("auctionId") ? payload.get("auctionId").getAsInt() : -1;
         int bidderId = payload.has("bidderId") ? payload.get("bidderId").getAsInt() : -1;
-        double amount = payload.has("amount") ? payload.get("amount").getAsDouble() : 0.0;
+
+        // Hỗ trợ chuẩn hóa hợp đồng JSON: đọc trường amount chính thức, tự động fallback bidAmount
+        double amount = 0.0;
+        if (payload.has("amount") && !payload.get("amount").isJsonNull()) {
+            amount = payload.get("amount").getAsDouble();
+        } else if (payload.has("bidAmount") && !payload.get("bidAmount").isJsonNull()) {
+            amount = payload.get("bidAmount").getAsDouble();
+        }
 
         if (auctionId <= 0 || bidderId <= 0 || amount <= 0) {
             return Message.error(Message.ACTION_PLACE_BID, "Thông tin đặt giá (auctionId, bidderId, amount) không hợp lệ.");

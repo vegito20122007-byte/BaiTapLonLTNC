@@ -31,6 +31,13 @@ public abstract class BaseController {
      * Chuyển đổi màn hình hiển thị trong ứng dụng (nhận Event đa năng).
      */
     protected void switchToScene(Event event, String fxmlPath, String title) {
+        switchSceneWithController(event, fxmlPath, title);
+    }
+
+    /**
+     * Chuyển đổi màn hình và trả về Controller của màn hình đích để truyền dữ liệu.
+     */
+    protected <T> T switchSceneWithController(Event event, String fxmlPath, String title) {
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource(fxmlPath));
             Parent root = loader.load();
@@ -38,9 +45,11 @@ public abstract class BaseController {
             stage.setTitle(title);
             stage.setScene(new Scene(root));
             stage.show();
+            return loader.getController();
         } catch (IOException e) {
             System.err.println(">> Lỗi khi tải màn hình: " + fxmlPath);
             e.printStackTrace();
+            return null;
         }
     }
 

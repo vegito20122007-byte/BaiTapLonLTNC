@@ -56,7 +56,7 @@
                   <Font size="12.0" />
                </font>
             </Label>
-            <Button defaultButton="true" maxWidth="1.7976931348623157E308" onAction="#handleLogin" prefHeight="38.0" text="Đăng nhập">
+            <Button fx:id="btnLogin" defaultButton="true" maxWidth="1.7976931348623157E308" onAction="#handleLogin" prefHeight="38.0" text="Đăng nhập">
                <font>
                   <Font name="System Bold" size="13.0" />
                </font>
