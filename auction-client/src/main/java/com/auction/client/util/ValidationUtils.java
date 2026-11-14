@@ -165,6 +165,35 @@ public final class ValidationUtils {
         }
     }
 
+    /**
+     * Tính toán bước giá tối thiểu động theo mô hình bậc thang khoảng giá (Tiered Bid Increment).
+     * Áp dụng theo quy chuẩn thực tế của các sàn đấu giá chuyên nghiệp (eBay, Sotheby's):
+     * - Dưới 1 triệu VNĐ: bước giá 20,000 VNĐ
+     * - Từ 1 triệu đến < 10 triệu VNĐ: bước giá 100,000 VNĐ
+     * - Từ 10 triệu đến < 50 triệu VNĐ: bước giá 500,000 VNĐ
+     * - Từ 50 triệu đến < 200 triệu VNĐ: bước giá 1,000,000 VNĐ
+     * - Từ 200 triệu VNĐ trở lên: bước giá 5,000,000 VNĐ
+     *
+     * @param currentPrice mức giá hiện tại của sản phẩm
+     * @return bước giá tối thiểu tương ứng
+     */
+    public static double calculateMinIncrement(double currentPrice) {
+        if (!Double.isFinite(currentPrice) || currentPrice <= 0) {
+            return 20_000.0;
+        }
+        if (currentPrice < 1_000_000.0) {
+            return 20_000.0;
+        } else if (currentPrice < 10_000_000.0) {
+            return 100_000.0;
+        } else if (currentPrice < 50_000_000.0) {
+            return 500_000.0;
+        } else if (currentPrice < 200_000_000.0) {
+            return 1_000_000.0;
+        } else {
+            return 5_000_000.0;
+        }
+    }
+
     private static void validateUsernameFormat(String trimmedUsername) {
         if (trimmedUsername.length() < MIN_USERNAME_LENGTH) {
             throw new DataValidationException("Tên đăng nhập phải chứa ít nhất " + MIN_USERNAME_LENGTH + " ký tự!");
