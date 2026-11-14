@@ -201,4 +201,54 @@ class ValidationUtilsTest {
         assertFalse(ValidationUtils.isValidReservePrice(Double.NaN, 1_000_000));
         assertFalse(ValidationUtils.isValidReservePrice(1_000_000, Double.POSITIVE_INFINITY));
     }
+
+    // ==========================================
+    // 6. KIỂM THỬ BƯỚC GIÁ BẬC THANG THEO KHOẢNG GIÁ (TIERED BID INCREMENT)
+    // ==========================================
+
+    @Test
+    @DisplayName("Giá dưới 1 triệu VNĐ có bước giá tối thiểu là 20,000 VNĐ")
+    void testCalculateMinIncrementUnder1Million() {
+        assertEquals(20_000.0, ValidationUtils.calculateMinIncrement(0));
+        assertEquals(20_000.0, ValidationUtils.calculateMinIncrement(100_000.0));
+        assertEquals(20_000.0, ValidationUtils.calculateMinIncrement(999_999.0));
+    }
+
+    @Test
+    @DisplayName("Giá từ 1 triệu đến dưới 10 triệu VNĐ có bước giá tối thiểu là 100,000 VNĐ")
+    void testCalculateMinIncrementFrom1To10Million() {
+        assertEquals(100_000.0, ValidationUtils.calculateMinIncrement(1_000_000.0));
+        assertEquals(100_000.0, ValidationUtils.calculateMinIncrement(5_000_000.0));
+        assertEquals(100_000.0, ValidationUtils.calculateMinIncrement(9_999_999.0));
+    }
+
+    @Test
+    @DisplayName("Giá từ 10 triệu đến dưới 50 triệu VNĐ có bước giá tối thiểu là 500,000 VNĐ")
+    void testCalculateMinIncrementFrom10To50Million() {
+        assertEquals(500_000.0, ValidationUtils.calculateMinIncrement(10_000_000.0));
+        assertEquals(500_000.0, ValidationUtils.calculateMinIncrement(25_000_000.0));
+        assertEquals(500_000.0, ValidationUtils.calculateMinIncrement(49_999_999.0));
+    }
+
+    @Test
+    @DisplayName("Giá từ 50 triệu đến dưới 200 triệu VNĐ có bước giá tối thiểu là 1,000,000 VNĐ")
+    void testCalculateMinIncrementFrom50To200Million() {
+        assertEquals(1_000_000.0, ValidationUtils.calculateMinIncrement(50_000_000.0));
+        assertEquals(1_000_000.0, ValidationUtils.calculateMinIncrement(150_000_000.0));
+        assertEquals(1_000_000.0, ValidationUtils.calculateMinIncrement(199_999_999.0));
+    }
+
+    @Test
+    @DisplayName("Giá từ 200 triệu VNĐ trở lên có bước giá tối thiểu là 5,000,000 VNĐ")
+    void testCalculateMinIncrementFrom200MillionUp() {
+        assertEquals(5_000_000.0, ValidationUtils.calculateMinIncrement(200_000_000.0));
+        assertEquals(5_000_000.0, ValidationUtils.calculateMinIncrement(1_000_000_000.0));
+    }
+
+    @Test
+    @DisplayName("calculateMinIncrement xử lý an toàn các giá trị biên âm hoặc vô hạn")
+    void testCalculateMinIncrementEdgeCases() {
+        assertEquals(20_000.0, ValidationUtils.calculateMinIncrement(-500_000.0));
+        assertEquals(20_000.0, ValidationUtils.calculateMinIncrement(Double.NaN));
+    }
 }

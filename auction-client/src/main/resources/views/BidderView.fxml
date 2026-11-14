@@ -77,7 +77,7 @@
                                 </HBox>
                                 <HBox spacing="10.0">
                                     <children>
-                                        <Label text="Bước giá tối thiểu (Seller):" textFill="#70757a" />
+                                        <Label text="Bước giá tối thiểu:" textFill="#70757a" />
                                         <Label fx:id="lblMinIncrement" text="100,000 VNĐ" textFill="#d93025">
                                             <font>
                                                 <Font name="System Bold" size="13.0" />
@@ -132,7 +132,7 @@
                                         <!-- HIỂN THỊ RÕ BƯỚC GIÁ CỦA SELLER -->
                                         <VBox>
                                             <children>
-                                                <Label text="BƯỚC GIÁ (SELLER)" textFill="#70757a">
+                                                <Label text="BƯỚC GIÁ TỐI THIỂU" textFill="#70757a">
                                                     <font>
                                                         <Font size="11.0" />
                                                     </font>

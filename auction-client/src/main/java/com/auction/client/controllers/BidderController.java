@@ -108,6 +108,7 @@ public class BidderController extends BaseController {
         setupCountdownFromSeller(defaultEndTime);
 
         // 4. Khởi tạo giá ban đầu và hiển thị
+        this.minIncrement = ValidationUtils.calculateMinIncrement(currentPrice);
         updatePriceDisplay(currentPrice, "Chưa có ai đặt");
         updateIncrementUI();
 
@@ -181,6 +182,7 @@ public class BidderController extends BaseController {
         }
 
         String winner = auction.getCurrentWinner() != null ? auction.getCurrentWinner().getUsername() : "Chưa có ai đặt";
+        this.minIncrement = ValidationUtils.calculateMinIncrement(currPrice);
         setAuctionInfo(name, startPrice, currPrice, this.minIncrement, end);
         if (lblWinner != null) {
             lblWinner.setText(winner);
@@ -244,7 +246,7 @@ public class BidderController extends BaseController {
         if (lblItemName != null && itemName != null) lblItemName.setText(itemName);
         if (lblStartingPrice != null) lblStartingPrice.setText(currencyFormatter.format(startPrice) + " VNĐ");
         this.currentPrice = currentPrice;
-        this.minIncrement = minIncrement > 0 ? minIncrement : 100000.0;
+        this.minIncrement = (minIncrement > 0) ? minIncrement : ValidationUtils.calculateMinIncrement(currentPrice);
 
         updatePriceDisplay(this.currentPrice, "Chưa có ai đặt");
         if (endTime != null) {
@@ -445,6 +447,7 @@ public class BidderController extends BaseController {
 
     private void executeBidSuccess(double newPrice, String winnerName) {
         this.currentPrice = newPrice;
+        this.minIncrement = ValidationUtils.calculateMinIncrement(newPrice);
         updatePriceDisplay(newPrice, winnerName);
         updateIncrementUI();
 
